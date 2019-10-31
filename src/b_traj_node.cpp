@@ -67,7 +67,7 @@ int _traj_id = 1;
 COLLISION_CELL _free_cell(0.0);
 COLLISION_CELL _obst_cell(1.0);
 // ros related
-ros::Subscriber _map_sub, _pts_sub, _odom_sub;
+ros::Subscriber _map_sub, _pts_sub, _pt_sub, _odom_sub;
 ros::Publisher _fm_path_vis_pub, _local_map_vis_pub, _inf_map_vis_pub, _corridor_vis_pub, _traj_vis_pub, _grid_path_vis_pub, _nodes_vis_pub, _traj_pub, _checkTraj_vis_pub, _stopTraj_vis_pub;
 
 // trajectory related
@@ -88,6 +88,7 @@ CollisionMapGrid * collision_map_local = new CollisionMapGrid();
 gridPathFinder * path_finder           = new gridPathFinder();
 
 void rcvWaypointsCallback(const nav_msgs::Path & wp);
+void rcvWaypointCallback(const geometry_msgs::PoseStamped & wp);
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map);
 void rcvOdometryCallbck(const nav_msgs::Odometry odom);
 
@@ -118,7 +119,7 @@ quadrotor_msgs::PolynomialTrajectory getBezierTraj();
 
 void rcvOdometryCallbck(const nav_msgs::Odometry odom)
 {
-    if (odom.header.frame_id != "uav") 
+    if (odom.header.frame_id != "world") 
         return ;
 
     _odom = odom;
@@ -144,7 +145,7 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
     transform.setOrigin( tf::Vector3(_odom.pose.pose.position.x, _odom.pose.pose.position.y, _odom.pose.pose.position.z) );
     transform.setRotation(tf::Quaternion(0, 0, 0, 1.0));
     br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "world", "quadrotor"));
-}
+} 
 
 void rcvWaypointsCallback(const nav_msgs::Path & wp)
 {     
@@ -160,6 +161,24 @@ void rcvWaypointsCallback(const nav_msgs::Path & wp)
     _is_emerg   = true;
 
     ROS_INFO("[Fast Marching Node] receive the way-points");
+
+    trajPlanning();
+}
+
+void rcvWaypointCallback(const geometry_msgs::PoseStamped & wp)
+{     
+    if(wp.pose.position.z < 0.0)
+        return;
+
+    _is_init = false;
+    _end_pt << wp.pose.position.x,
+               wp.pose.position.y,
+               wp.pose.position.z;
+
+    _has_target = true;
+    _is_emerg   = true;
+
+    ROS_INFO("[Fast Marching Node] receive the way-point %f, %f, %f", _end_pt[0], _end_pt[1], _end_pt[2]);
 
     trajPlanning();
 }
@@ -806,12 +825,16 @@ double velMapping(double d, double max_v)
 
 void trajPlanning()
 {   
+
+    ROS_INFO_THROTTLE(1, " Waypoint(s): %d, Map: %d, Odometry: %d",_has_target, _has_map, _has_odom);
+
     if( _has_target == false || _has_map == false || _has_odom == false) 
         return;
 
     vector<Cube> corridor;
     if(_is_use_fm)
     {
+    
         ros::Time time_1 = ros::Time::now();
         float oob_value = INFINITY;
         auto EDT = collision_map_local->ExtractDistanceField(oob_value);
@@ -1168,6 +1191,7 @@ int main(int argc, char** argv)
     _map_sub  = nh.subscribe( "map",       1, rcvPointCloudCallBack );
     _odom_sub = nh.subscribe( "odometry",  1, rcvOdometryCallbck);
     _pts_sub  = nh.subscribe( "waypoints", 1, rcvWaypointsCallback );
+    _pt_sub  = nh.subscribe( "waypoint", 1, rcvWaypointCallback );
 
     _inf_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("vis_map_inflate", 1);
     _local_map_vis_pub = nh.advertise<sensor_msgs::PointCloud2>("vis_map_local", 1);
