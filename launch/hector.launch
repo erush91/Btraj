@@ -15,7 +15,7 @@
       <remap from="~waypoint"       to="/goal"/>
       <remap from="~odometry"       to="/ground_truth/state"/>
       <remap from="~map"            to="/octomap_final_output"/> 
-      <remap from="~command"        to="/position_cmd"/> 
+      <remap from="~command"        to="/position_command"/> 
       <param name="optimization/poly_order"  value="8"/> 
       <param name="optimization/min_order"   value="2.5"/> 
       <param name="map/x_size"       value="$(arg map_size_x)"/>
@@ -48,7 +48,7 @@
   <node pkg  = "bezier_planer" type = "b_traj_server" output = "screen" name = "b_traj_server">    
       <remap from = "~trajectory"        to = "b_traj_node/trajectory"/>
       <remap from = "~odometry"          to = "/ground_truth/state"/>
-      <remap from = "~position_command"  to = "/position_cmd"/>
+      <remap from = "~position_command"  to = "/position_command"/>
       <param name="optimization/poly_order_min" value="3" /> 
       <param name="optimization/poly_order_max" value="12"/> 
   </node>
