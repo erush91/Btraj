@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(bezier_planer)
+project(fmm_planner)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/sdf_tools)
 
@@ -39,8 +39,8 @@ include_directories(
 set(CMAKE_CXX_FLAGS "-std=c++0x ${CMAKE_CXX_FLAGS} -O3 -Wall") # -Wextra -Werror
 
 add_executable(
-    b_traj_node 
-    src/b_traj_node.cpp
+    fmm_planner_node 
+    src/fmm_planner_node.cpp
     src/bezier_base.cpp
     src/trajectory_generator.cpp
     src/a_star.cpp
@@ -48,7 +48,7 @@ add_executable(
     third_party/fast_methods/fm/fmdata/fmcell.cpp
     third_party/fast_methods/ndgridmap/cell.cpp
 )
-target_link_libraries(b_traj_node ${catkin_LIBRARIES} sdf_tools ${PCL_LIBRARIES} mosek64)
+target_link_libraries(fmm_planner_node ${catkin_LIBRARIES} sdf_tools ${PCL_LIBRARIES} mosek64)
 
 add_executable ( b_traj_server src/traj_server.cpp src/bezier_base.cpp)
 target_link_libraries( b_traj_server

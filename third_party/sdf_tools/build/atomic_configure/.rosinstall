@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/erush91/catkin_ws/src/Btraj/third_party/sdf_tools/build/devel/setup.sh

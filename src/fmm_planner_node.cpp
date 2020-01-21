@@ -118,8 +118,8 @@ quadrotor_msgs::PolynomialTrajectory getBezierTraj();
 
 void rcvOdometryCallbck(const nav_msgs::Odometry odom)
 {
-    if (odom.header.frame_id != "uav") 
-        return ;
+    // if (odom.header.frame_id != "uav") 
+        // return ;
 
     _odom = odom;
     _has_odom = true;
@@ -143,7 +143,7 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
     tf::Transform transform;
     transform.setOrigin( tf::Vector3(_odom.pose.pose.position.x, _odom.pose.pose.position.y, _odom.pose.pose.position.z) );
     transform.setRotation(tf::Quaternion(0, 0, 0, 1.0));
-    br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "world", "quadrotor"));
+    br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "map", "quadrotor"));
 }
 
 void rcvWaypointsCallback(const nav_msgs::Path & wp)
@@ -166,8 +166,8 @@ void rcvWaypointsCallback(const nav_msgs::Path & wp)
 
 Vector3d _local_origin;
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
-{   
-    pcl::PointCloud<pcl::PointXYZ> cloud;
+{
+    pcl::PointCloud<pcl::PointXYZI> cloud;
     pcl::fromROSMsg(pointcloud_map, cloud);
 
     if((int)cloud.points.size() == 0)
@@ -194,7 +194,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     double _y_buffer_size = _y_local_size + _buffer_size;
     double _z_buffer_size = _z_local_size + _buffer_size;
 
-    collision_map_local = new CollisionMapGrid(origin_local_transform, "world", _resolution, _x_buffer_size, _y_buffer_size, _z_buffer_size, _free_cell);
+    collision_map_local = new CollisionMapGrid(origin_local_transform, "map", _resolution, _x_buffer_size, _y_buffer_size, _z_buffer_size, _free_cell);
 
     vector<pcl::PointXYZ> inflatePts(20);
     pcl::PointCloud<pcl::PointXYZ> cloud_inflation;
@@ -224,12 +224,12 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cloud_inflation.width = cloud_inflation.points.size();
     cloud_inflation.height = 1;
     cloud_inflation.is_dense = true;
-    cloud_inflation.header.frame_id = "world";
+    cloud_inflation.header.frame_id = "map";
 
     cloud_local.width = cloud_local.points.size();
     cloud_local.height = 1;
     cloud_local.is_dense = true;
-    cloud_local.header.frame_id = "world";
+    cloud_local.header.frame_id = "map";
 
     sensor_msgs::PointCloud2 inflateMap, localMap;
 
@@ -237,12 +237,149 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     pcl::toROSMsg(cloud_local, localMap);
     _inf_map_vis_pub.publish(inflateMap);
     _local_map_vis_pub.publish(localMap);
-
+    
     ros::Time time_3 = ros::Time::now();
     //ROS_WARN("Time in receving the map is %f", (time_3 - time_1).toSec());
 
+    std::cout << "_start_pt: " << _start_pt(0) << ", " << _start_pt(1) << ", " << _start_pt(2) << std::endl;
+
+    Eigen::Affine3d origin_transform;
+    std::string frame;
+    double resolution = 0.2;
+    double x_size = 50;
+    double y_size = 50;
+    double z_size = 50;
+    float oob_value2 = -INFINITY;
+    
+    // Initialize the SDF
+    SignedDistanceField new_sdf(origin_transform, frame, resolution, x_size, y_size, z_size, oob_value2);
+
+
+    unsigned int size_x = (unsigned int)(_max_x_id);
+    unsigned int size_y = (unsigned int)(_max_y_id);
+    unsigned int size_z = (unsigned int)(_max_z_id);
+
+    Coord3D dimsize {size_x, size_y, size_z};
+    FMGrid3D grid_fmm(dimsize);
+    
+    unsigned long int idx;
+    vector<unsigned int> obs;
+    Vector3d pt;
+    vector<int64_t> pt_idx;
+    double flow_vel;
+    double max_vel = _MAX_Vel * 0.75;
+
+
+    unsigned long int index;
+
+    for(unsigned long int i = 0; i < size_x*size_y*size_z; i++)
+    {
+        grid_fmm[i].setOccupancy(0.0);
+    }
+
+    // Assign the SDF
+    for (int idx = 0; idx < (int)cloud.points.size(); idx++)
+    {
+        auto mk = cloud.points[idx];
+        new_sdf.SignedDistanceField::Set(mk.x, mk.y, mk.z, mk.intensity);
+
+        unsigned long int  i = (mk.x - _map_origin(0)) * _inv_resolution;
+        unsigned long int  j = (mk.y - _map_origin(1)) * _inv_resolution;
+        unsigned long int  k = (mk.z - _map_origin(2)) * _inv_resolution;
+        
+        index = k * size_y * size_x + j * size_x + i;
+        
+        double d = mk.intensity;
+
+        flow_vel = 1;
+        grid_fmm[index].setOccupancy(flow_vel);
+
+        // std::cout << "PCL Value: " << mk.x << ", " << mk.y << ", " << mk.z << ", " << mk.intensity << std::endl;
+    }
+
+    // Print the SDF
+    for (int64_t x_index = 0; x_index < new_sdf.GetNumXCells(); x_index++)
+    {
+        for (int64_t y_index = 0; y_index < new_sdf.GetNumYCells(); y_index++)
+        {
+            for (int64_t z_index = 0; z_index < new_sdf.GetNumZCells(); z_index++)
+            {
+                // std::cout << new_sdf.SignedDistanceField::Get(x_index, y_index, z_index);
+            }
+        }
+    }    
+
+    grid_fmm.setOccupiedCells(std::move(obs));
+    grid_fmm.setLeafSize(_resolution);
+
+    Vector3d startIdx3d = (_start_pt - _map_origin) * _inv_resolution;
+    Vector3d endIdx3d   = (_end_pt   - _map_origin) * _inv_resolution;
+
+    std::cout << "EndIdx3d: " << endIdx3d[0] << ", " << endIdx3d[1] << ", " << endIdx3d[2] << ", " << std::endl;
+
+    Coord3D goal_point = {(unsigned int)startIdx3d[0], (unsigned int)startIdx3d[1], (unsigned int)startIdx3d[2]};
+    Coord3D init_point = {(unsigned int)endIdx3d[0],   (unsigned int)endIdx3d[1],   (unsigned int)endIdx3d[2]};
+
+    unsigned int startIdx;
+    vector<unsigned int> startIndices;
+    grid_fmm.coord2idx(init_point, startIdx);
+
+    startIndices.push_back(startIdx);
+
+    unsigned int goalIdx;
+    grid_fmm.coord2idx(goal_point, goalIdx);
+    grid_fmm[goalIdx].setOccupancy(max_vel);
+
+    Solver<FMGrid3D>* fm_solver = new FMMStar<FMGrid3D>("FMM*_Dist", TIME); // LSM, FMM
+
+    fm_solver->setEnvironment(&grid_fmm);
+    fm_solver->setInitialPoints(startIndices, goalIdx);
+
+    ros::Time time_bef_fm = ros::Time::now();
+    if(fm_solver->compute(max_vel) == -1)
+    {
+        ROS_WARN("[Fast Marching Node] No path can be found");
+        _traj.action = quadrotor_msgs::PolynomialTrajectory::ACTION_WARN_IMPOSSIBLE;
+        _traj_pub.publish(_traj);
+        _has_traj = false;
+
+        return;
+    }
+    ros::Time time_aft_fm = ros::Time::now();
+    ROS_WARN("[Fast Marching Node] Time in Fast Marching computing is %f", (time_aft_fm - time_bef_fm).toSec() );
+
+    Path3D path3D;
+    vector<double> path_vels, time;
+    GradientDescent< FMGrid3D > grad3D;
+    grid_fmm.coord2idx(goal_point, goalIdx);
+
+    if(grad3D.gradient_descent(grid_fmm, goalIdx, path3D, path_vels, time) == -1)
+    {
+        ROS_WARN("[Fast Marching Node] FMM failed, valid path not exists");
+        if(_has_traj && _is_emerg)
+        {
+            _traj.action = quadrotor_msgs::PolynomialTrajectory::ACTION_WARN_IMPOSSIBLE;
+            _traj_pub.publish(_traj);
+            _has_traj = false;
+        }
+        return;
+    }
+
+
+
+
+
+
+    if( checkExecTraj() == false )
+    {
+        std::cout << "checkExecTraj: " << "false" << std::endl;
+    }
+
     if( checkExecTraj() == true )
-        trajPlanning(); 
+    {
+        std::cout << "checkExecTraj: " << "true" << std::endl;
+        trajPlanning();
+    }     
 }
 
 vector<pcl::PointXYZ> pointInflate( pcl::PointXYZ pt)
@@ -269,7 +406,10 @@ vector<pcl::PointXYZ> pointInflate( pcl::PointXYZ pt)
 bool checkExecTraj()
 {
     if( _has_traj == false )
+    {
+        std::cout << "  _has_traj: " << "false" << std::endl;
         return false;
+    }
 
     Vector3d traj_pt;
 
@@ -277,7 +417,7 @@ bool checkExecTraj()
 
     geometry_msgs::Point pt;
     _stop_traj_vis.header.stamp    = _check_traj_vis.header.stamp    = ros::Time::now();
-    _stop_traj_vis.header.frame_id = _check_traj_vis.header.frame_id = "world";
+    _stop_traj_vis.header.frame_id = _check_traj_vis.header.frame_id = "map";
 
     _check_traj_vis.ns = "trajectory/check_trajectory";
     _stop_traj_vis.ns  = "trajectory/stop_trajectory";
@@ -806,12 +946,23 @@ double velMapping(double d, double max_v)
 
 void trajPlanning()
 {   
+
+    std::cout << "_has_target: " << _has_target << std::endl;
+    std::cout << "_has_map: " << _has_map << std::endl;
+    std::cout << "_has_odom: " << _has_odom << std::endl;
+
+    _has_target = false;
+    _has_map = false;
+    _has_odom = false;
+
     if( _has_target == false || _has_map == false || _has_odom == false) 
         return;
 
     vector<Cube> corridor;
     if(_is_use_fm)
     {
+
+                            
         ros::Time time_1 = ros::Time::now();
         float oob_value = INFINITY;
         auto EDT = collision_map_local->ExtractDistanceField(oob_value);
@@ -1224,7 +1375,7 @@ int main(int argc, char** argv)
     _Ca  = _bernstein.getC_a()[_traj_order];
     _Cj  = _bernstein.getC_j()[_traj_order];
 
-    _map_origin << -_x_size/2.0, -_y_size/2.0, 0.0;
+    _map_origin << -_x_size/2.0, -_y_size/2.0, -_z_size/2.0;
     _pt_max_x = + _x_size / 2.0;
     _pt_min_x = - _x_size / 2.0;
     _pt_max_y = + _y_size / 2.0;
@@ -1249,7 +1400,7 @@ int main(int argc, char** argv)
     Translation3d origin_translation( _map_origin(0), _map_origin(1), 0.0);
     Quaterniond origin_rotation(1.0, 0.0, 0.0, 0.0);
     Affine3d origin_transform = origin_translation * origin_rotation;
-    collision_map = new CollisionMapGrid(origin_transform, "world", _resolution, _x_size, _y_size, _z_size, _free_cell);
+    collision_map = new CollisionMapGrid(origin_transform, "map", _resolution, _x_size, _y_size, _z_size, _free_cell);
 
     ros::Rate rate(100);
     bool status = ros::ok();
@@ -1366,7 +1517,7 @@ void visPath(vector<Vector3d> path)
     path_vis.markers.clear();
 
     visualization_msgs::Marker mk;
-    mk.header.frame_id = "world";
+    mk.header.frame_id = "map";
     mk.header.stamp = ros::Time::now();
     mk.ns = "b_traj/fast_marching_path";
     mk.type = visualization_msgs::Marker::CUBE;
@@ -1412,7 +1563,7 @@ void visCorridor(vector<Cube> corridor)
     cube_vis.markers.clear();
 
     visualization_msgs::Marker mk;
-    mk.header.frame_id = "world";
+    mk.header.frame_id = "map";
     mk.header.stamp = ros::Time::now();
     mk.ns = "corridor";
     mk.type = visualization_msgs::Marker::CUBE;
@@ -1461,7 +1612,7 @@ void visBezierTrajectory(MatrixXd polyCoeff, VectorXd time)
     visualization_msgs::Marker traj_vis;
 
     traj_vis.header.stamp       = ros::Time::now();
-    traj_vis.header.frame_id    = "world";
+    traj_vis.header.frame_id    = "map";
 
     traj_vis.ns = "trajectory/trajectory";
     traj_vis.id = 0;
@@ -1523,7 +1674,7 @@ void visGridPath( vector<Vector3d> grid_path )
     grid_vis.markers.clear();
 
     visualization_msgs::Marker mk;
-    mk.header.frame_id = "world";
+    mk.header.frame_id = "map";
     mk.header.stamp = ros::Time::now();
     mk.ns = "b_traj/grid_path";
     mk.type = visualization_msgs::Marker::CUBE;
@@ -1561,7 +1712,7 @@ void visGridPath( vector<Vector3d> grid_path )
 void visExpNode( vector<GridNodePtr> nodes )
 {
     visualization_msgs::Marker node_vis;
-    node_vis.header.frame_id = "world";
+    node_vis.header.frame_id = "map";
     node_vis.header.stamp = ros::Time::now();
     node_vis.ns = "b_traj/visited_nodes";
     node_vis.type = visualization_msgs::Marker::CUBE_LIST;
