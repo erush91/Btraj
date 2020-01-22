@@ -205,7 +205,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     unsigned long int idx;
     unsigned long int index;
 
-    for(unsigned long int i = 0; i < size_x*size_y*size_z; i++)
+    for(unsigned long int i = 0; i < size_x * size_y * size_z; i++)
     {
         grid_fmm_3d[i].setOccupancy(-1.0);
     }
@@ -261,6 +261,25 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
 
 
+    Path3D path3D;
+    vector<double> path_vels, time;
+    GradientDescent< FMGrid3D > grad3D;
+    grid_fmm_3d.coord2idx(goal_point, goalIdx);
+
+    if(grad3D.gradient_descent(grid_fmm_3d, startIdx, path3D, path_vels, time) == -1)
+    {
+        std::cout << "GRADIENT DESCENT FMM ERROR" << std::endl;
+    }
+    else
+    {
+        _traj_pub.publish(_traj);
+    }
+
+
+
+
+
+
     pcl::PointCloud<pcl::PointXYZI> cloud_esdf;
     cloud_esdf.height = 1;
     cloud_esdf.is_dense = true;
@@ -269,7 +288,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     long int cnt = 0;
     for(unsigned long int idx = 0; idx < size_x*size_y*size_z; idx++)
     {
-        // std::cout << "hello" << idx << std::endl;
         int k = idx / (size_x * size_y);
         int j = (idx - k * size_x * size_y) / size_x;
         int i = idx - k * size_x * size_y - j * size_x;
@@ -278,7 +296,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         esdf_pt.y = (j + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
         esdf_pt.z = (k + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
         esdf_pt.intensity = grid_fmm_3d[idx].getOccupancy();
-        // std::cout << fmm_pt.x << ", " << fmm_pt.y << ", " << fmm_pt.z << ", " << fmm_pt.intensity << std::endl;
         if(esdf_pt.intensity > 0)
         {
             cnt++;
@@ -314,7 +331,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         fmm_pt.y = (j + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
         fmm_pt.z = (k + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
         fmm_pt.intensity = grid_fmm_3d[idx].getArrivalTime();
-        // std::cout << fmm_pt.x << ", " << fmm_pt.y << ", " << fmm_pt.z << ", " << fmm_pt.intensity << std::endl;
         if(fmm_pt.intensity >= 0 && fmm_pt.intensity < 99999)
         {
             cnt++;
