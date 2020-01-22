@@ -96,7 +96,7 @@ COLLISION_CELL _free_cell(0.0);
 COLLISION_CELL _obst_cell(1.0);
 // ros related
 ros::Subscriber _map_sub, _pts_sub, _odom_sub;
-ros::Publisher _fm_path_vis_pub, _local_map_vis_pub, _fmm_map_vis_pub, _inf_map_vis_pub, _corridor_vis_pub, _traj_vis_pub, _grid_path_vis_pub, _nodes_vis_pub, _traj_pub, _checkTraj_vis_pub, _stopTraj_vis_pub;
+ros::Publisher _fm_path_vis_pub, _local_map_vis_pub, _esdf_map_vis_pub, _fmm_map_vis_pub, _inf_map_vis_pub, _corridor_vis_pub, _traj_vis_pub, _grid_path_vis_pub, _nodes_vis_pub, _traj_pub, _checkTraj_vis_pub, _stopTraj_vis_pub;
 
 // trajectory related
 int _seg_num;
@@ -226,7 +226,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         unsigned int  k = (round(mk.z) - _start_pt_rounded(2) - _map_origin(2)) * _inv_resolution;
         index = i + j * size_x + k * size_x * size_y;
         // grid_fmm_3d[index].setOccupancy(mk.intensity);
-        grid_fmm_3d[index].setOccupancy(max_vel);
+        // grid_fmm_3d[index].setOccupancy(max_vel);
+        grid_fmm_3d.getCell(index).setValue(1.0);
 
         // std::cout << index << " ";
         // std::cout << mk.intensity << " ";
@@ -236,7 +237,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
         std::cout << "grid_fmm_3d.getCell(11).getValue() " << grid_fmm_3d.getCell(11).getValue() << " ";
 
-        grid_fmm_3d[10].setOccupancy(1.0);
+        grid_fmm_3d.getCell(10).setValue(1.0);
 
         std::cout << "grid_fmm_3d.getCell(10).getValue() " << grid_fmm_3d.getCell(10).getValue() << " ";
 
@@ -360,13 +361,46 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
 
 
+    pcl::PointCloud<pcl::PointXYZI> cloud_esdf;
+    cloud_esdf.height = 1;
+    cloud_esdf.is_dense = true;
+    cloud_esdf.header.frame_id = "odom";
+
+    long int cnt = 0;
+    for(unsigned long int idx = 0; idx < size_x*size_y*size_z; idx++)
+    {
+        // std::cout << "hello" << idx << std::endl;
+        int k = idx / (size_x * size_y);
+        int j = (idx - k * size_x * size_y) / size_x;
+        int i = idx - k * size_x * size_y - j * size_x;
+        pcl::PointXYZI esdf_pt;
+        esdf_pt.x = (i + 0.5) * _resolution + _start_pt_rounded(0) + _map_origin(0);
+        esdf_pt.y = (j + 0.5) * _resolution + _start_pt_rounded(1) + _map_origin(1);
+        esdf_pt.z = (k + 0.5) * _resolution + _start_pt_rounded(2) + _map_origin(2);
+        esdf_pt.intensity = grid_fmm_3d.getCell(idx).getValue();
+        // std::cout << fmm_pt.x << ", " << fmm_pt.y << ", " << fmm_pt.z << ", " << fmm_pt.intensity << std::endl;
+        if(esdf_pt.intensity < 99999)
+        {
+            cnt++;
+            cloud_esdf.push_back(esdf_pt);
+        }
+    }
+
+    cloud_esdf.width = cnt;
+    std::cout << cnt << std::endl;
+    std::cout << cloud_esdf.points.size() << std::endl;
+
+    sensor_msgs::PointCloud2 esdfMap;
+    pcl::toROSMsg(cloud_esdf, esdfMap);
+    _esdf_map_vis_pub.publish(esdfMap);
+
 
     pcl::PointCloud<pcl::PointXYZI> cloud_fmm;
     cloud_fmm.height = 1;
     cloud_fmm.is_dense = true;
     cloud_fmm.header.frame_id = "odom";
 
-    long int cnt = 0;
+    cnt = 0;
     for(unsigned long int idx = 0; idx < size_x*size_y*size_z; idx++)
     {
         // std::cout << "hello" << idx << std::endl;
@@ -456,6 +490,7 @@ int main(int argc, char** argv)
 
     _inf_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("vis_map_inflate", 1);
     _local_map_vis_pub = nh.advertise<sensor_msgs::PointCloud2>("vis_map_local", 1);
+    _esdf_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("vis_map_esdf", 1);
     _fmm_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("vis_map_fmm", 1);
     _traj_vis_pub      = nh.advertise<visualization_msgs::Marker>("trajectory_vis", 1);
     _corridor_vis_pub  = nh.advertise<visualization_msgs::MarkerArray>("corridor_vis", 1);
