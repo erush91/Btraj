@@ -86,7 +86,7 @@ bool _has_traj  = false;
 bool _is_emerg  = false;
 bool _is_init   = true;
 
-Vector3d _start_pt, _start_pt_rounded, _start_pt_rounding_error, _end_pt;
+Vector3d _start_pt, _end_pt;
 double _init_x, _init_y, _init_z;
 Vector3d _map_origin;
 double _pt_max_x, _pt_min_x, _pt_max_y, _pt_min_y, _pt_max_z, _pt_min_z;
@@ -156,14 +156,6 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
     _start_pt(0)  = _odom.pose.pose.position.x;
     _start_pt(1)  = _odom.pose.pose.position.y;
     _start_pt(2)  = _odom.pose.pose.position.z;
-
-    _start_pt_rounded(0)  = round(_start_pt(0) / _resolution) * _resolution;
-    _start_pt_rounded(1)  = round(_start_pt(1) / _resolution) * _resolution;
-    _start_pt_rounded(2)  = round(_start_pt(2) / _resolution) * _resolution;
-
-    _start_pt_rounding_error(0)  = _start_pt(0) - _start_pt_rounded(0);
-    _start_pt_rounding_error(1)  = _start_pt(1) - _start_pt_rounded(1);
-    _start_pt_rounding_error(2)  = _start_pt(2) - _start_pt_rounded(2);
 }
 
 void rcvWaypointsCallback(const nav_msgs::Path & wp)
@@ -189,7 +181,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     pcl::PointCloud<pcl::PointXYZI> cloud;  
     pcl::fromROSMsg(pointcloud_map, cloud);
 
-    std::cout << "_start_pt_rounded: " << _start_pt_rounded(0) << ", " << _start_pt_rounded(1) << ", " << _start_pt_rounded(2) << std::endl;
+    std::cout << "_start_pt: " << _start_pt(0) << ", " << _start_pt(1) << ", " << _start_pt(2) << std::endl;
 
     Eigen::Affine3d origin_transform;
     std::string frame;
@@ -208,42 +200,36 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     grid_fmm_3d.clear();
 
     double max_vel = _MAX_Vel * 0.75;
+    vector<unsigned int> obs;
 
     unsigned long int idx;
     unsigned long int index;
 
-    // for(unsigned long int i = 0; i < size_x*size_y*size_z; i++)
-    // {
-    //     grid_fmm_3d[i].setOccupancy(0.0);
-    // }
+    for(unsigned long int i = 0; i < size_x*size_y*size_z; i++)
+    {
+        grid_fmm_3d[i].setOccupancy(0.0);
+    }
 
     // Assign the ESDF
     for (unsigned long int idx = 0; idx < cloud.points.size(); idx++)
     {
         pcl::PointXYZI mk = cloud.points[idx];
-        unsigned int  i = (round(mk.x) - _start_pt_rounded(0) - _map_origin(0)) * _inv_resolution;
-        unsigned int  j = (round(mk.y) - _start_pt_rounded(1) - _map_origin(1)) * _inv_resolution;
-        unsigned int  k = (round(mk.z) - _start_pt_rounded(2) - _map_origin(2)) * _inv_resolution;
+        unsigned int  i = mk.x - _start_pt(0) - _map_origin(0) * _inv_resolution;
+        unsigned int  j = mk.y - _start_pt(1) - _map_origin(1) * _inv_resolution;
+        unsigned int  k = mk.z - _start_pt(2) - _map_origin(2) * _inv_resolution;
         index = i + j * size_x + k * size_x * size_y;
-        // grid_fmm_3d[index].setOccupancy(mk.intensity);
-        // grid_fmm_3d[index].setOccupancy(max_vel);
-        grid_fmm_3d.getCell(index).setValue(1.0);
-
-        // std::cout << index << " ";
-        // std::cout << mk.intensity << " ";
+        grid_fmm_3d[index].setOccupancy(mk.intensity);
     }
 
-        // std::cout <<  "max_vel" << max_vel;
+    for(unsigned long int i = 0; i < size_x*size_y*size_z; i++)
+    {
+        if (grid_fmm_3d[i].isOccupied())
+        {
+            obs.push_back(idx);
+        }
+    }
 
-        std::cout << "grid_fmm_3d.getCell(11).getValue() " << grid_fmm_3d.getCell(11).getValue() << " ";
-
-        grid_fmm_3d.getCell(10).setValue(1.0);
-
-        std::cout << "grid_fmm_3d.getCell(10).getValue() " << grid_fmm_3d.getCell(10).getValue() << " ";
-
-        std::cout << std::endl << std::endl << std::endl << std::endl << std::endl;
-
-    // grid_fmm_3d.setOccupiedCells(std::move(obs));
+    grid_fmm_3d.setOccupiedCells(std::move(obs));
     grid_fmm_3d.setLeafSize(_resolution);
 
     GridWriter::saveGridValues("test_fm3d.txt", grid_fmm_3d);
@@ -374,17 +360,19 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         int j = (idx - k * size_x * size_y) / size_x;
         int i = idx - k * size_x * size_y - j * size_x;
         pcl::PointXYZI esdf_pt;
-        esdf_pt.x = (i + 0.5) * _resolution + _start_pt_rounded(0) + _map_origin(0);
-        esdf_pt.y = (j + 0.5) * _resolution + _start_pt_rounded(1) + _map_origin(1);
-        esdf_pt.z = (k + 0.5) * _resolution + _start_pt_rounded(2) + _map_origin(2);
-        esdf_pt.intensity = grid_fmm_3d.getCell(idx).getValue();
+        esdf_pt.x = i * _resolution + _start_pt(0) + _map_origin(0);
+        esdf_pt.y = j * _resolution + _start_pt(1) + _map_origin(1);
+        esdf_pt.z = k * _resolution + _start_pt(2) + _map_origin(2);
+        esdf_pt.intensity = grid_fmm_3d[idx].getOccupancy();
         // std::cout << fmm_pt.x << ", " << fmm_pt.y << ", " << fmm_pt.z << ", " << fmm_pt.intensity << std::endl;
-        if(esdf_pt.intensity < 99999)
+        if(esdf_pt.intensity > 0)
         {
             cnt++;
             cloud_esdf.push_back(esdf_pt);
         }
     }
+
+    std::cout << "_resolution" << _resolution << std::endl;
 
     cloud_esdf.width = cnt;
     std::cout << cnt << std::endl;
@@ -408,10 +396,10 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         int j = (idx - k * size_x * size_y) / size_x;
         int i = idx - k * size_x * size_y - j * size_x;
         pcl::PointXYZI fmm_pt;
-        fmm_pt.x = (i + 0.5) * _resolution + _start_pt_rounded(0) + _map_origin(0);
-        fmm_pt.y = (j + 0.5) * _resolution + _start_pt_rounded(1) + _map_origin(1);
-        fmm_pt.z = (k + 0.5) * _resolution + _start_pt_rounded(2) + _map_origin(2);
-        fmm_pt.intensity = grid_fmm_3d.getCell(idx).getArrivalTime();
+        fmm_pt.x = (i + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
+        fmm_pt.y = (j + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
+        fmm_pt.z = (k + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
+        fmm_pt.intensity = grid_fmm_3d[idx].getArrivalTime();
         // std::cout << fmm_pt.x << ", " << fmm_pt.y << ", " << fmm_pt.z << ", " << fmm_pt.intensity << std::endl;
         if(fmm_pt.intensity < 99999)
         {
