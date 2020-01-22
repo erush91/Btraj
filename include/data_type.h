@@ -10,7 +10,7 @@
 #include <eigen3/Eigen/Dense>
 #include <vector>
 
-#define inf 1>>30
+#define INF 1>>30
 
 struct Cube;
 struct GridNode;
@@ -129,8 +129,8 @@ struct GridNode
       id = 0;
       index = _index;
       
-      gScore = inf;
-      fScore = inf;
+      gScore = INF;
+      fScore = INF;
       cameFrom = NULL;
    }
 
@@ -140,8 +140,8 @@ struct GridNode
       index = _index;
       coord = _coord;
 
-      gScore = inf;
-      fScore = inf;
+      gScore = INF;
+      fScore = INF;
       cameFrom = NULL;
    }
 

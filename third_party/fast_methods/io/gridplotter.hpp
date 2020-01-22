@@ -23,8 +23,8 @@
 #include <string>
 #include <array>
 
-#include "../fmm/fmdata/fmcell.h"
-#include "../ndgridmap/ndgridmap.hpp"
+// #include "../fm/fmdata/fmcell.h"
+// #include "../ndgridmap/ndgridmap.hpp"
 
 #include "../thirdparty/CImg.h"
 

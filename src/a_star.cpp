@@ -62,8 +62,8 @@ void gridPathFinder::resetLocalMap()
         tmpPtr->occupancy = 0; // forget the occupancy
         tmpPtr->id = 0;
         tmpPtr->cameFrom = NULL;
-        tmpPtr->gScore = inf;
-        tmpPtr->fScore = inf;
+        tmpPtr->gScore = INF;
+        tmpPtr->fScore = INF;
     }
 
     for(auto ptr:openSet)
@@ -72,8 +72,8 @@ void gridPathFinder::resetLocalMap()
         tmpPtr->occupancy = 0; // forget the occupancy
         tmpPtr->id = 0;
         tmpPtr->cameFrom = NULL;
-        tmpPtr->gScore = inf;
-        tmpPtr->fScore = inf;
+        tmpPtr->gScore = INF;
+        tmpPtr->fScore = INF;
     }
 
     expandedNodes.clear();
