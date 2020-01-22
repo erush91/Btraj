@@ -31,6 +31,29 @@
 #include "quadrotor_msgs/PositionCommand.h"
 #include "quadrotor_msgs/PolynomialTrajectory.h"
 
+
+
+
+
+
+#include <fast_methods/ndgridmap/fmcell.h>
+#include <fast_methods/ndgridmap/ndgridmap.hpp>
+
+#include <fast_methods/fm/fmm.hpp>
+#include <fast_methods/fm/sfmm.hpp>
+#include <fast_methods/fm/sfmmstar.hpp>
+#include <fast_methods/fm/fmmstar.hpp>
+#include <fast_methods/datastructures/fmfibheap.hpp>
+#include <fast_methods/datastructures/fmpriorityqueue.hpp>
+#include <fast_methods/fm/fim.hpp>
+#include <fast_methods/fm/gmm.hpp>
+#include <fast_methods/fm/ufmm.hpp>
+#include <fast_methods/fm/fsm.hpp>
+#include <fast_methods/fm/lsm.hpp>
+#include <fast_methods/fm/ddqm.hpp>
+
+
+
 #include <fast_methods/io/gridplotter.hpp>
 #include <fast_methods/io/gridwriter.hpp>
 
@@ -63,7 +86,7 @@ bool _has_traj  = false;
 bool _is_emerg  = false;
 bool _is_init   = true;
 
-Vector3d _start_pt, _start_pt_rounded, _end_pt;
+Vector3d _start_pt, _end_pt;
 double _init_x, _init_y, _init_z;
 Vector3d _map_origin;
 double _pt_max_x, _pt_min_x, _pt_max_y, _pt_min_y, _pt_max_z, _pt_min_z;
@@ -73,7 +96,7 @@ COLLISION_CELL _free_cell(0.0);
 COLLISION_CELL _obst_cell(1.0);
 // ros related
 ros::Subscriber _map_sub, _pts_sub, _odom_sub;
-ros::Publisher _fm_path_vis_pub, _local_map_vis_pub, _fmm_map_vis_pub, _inf_map_vis_pub, _corridor_vis_pub, _traj_vis_pub, _grid_path_vis_pub, _nodes_vis_pub, _traj_pub, _checkTraj_vis_pub, _stopTraj_vis_pub;
+ros::Publisher _fm_path_vis_pub, _local_map_vis_pub, _esdf_map_vis_pub, _fmm_map_vis_pub, _inf_map_vis_pub, _corridor_vis_pub, _traj_vis_pub, _grid_path_vis_pub, _nodes_vis_pub, _traj_pub, _checkTraj_vis_pub, _stopTraj_vis_pub;
 
 // trajectory related
 int _seg_num;
@@ -133,10 +156,6 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
     _start_pt(0)  = _odom.pose.pose.position.x;
     _start_pt(1)  = _odom.pose.pose.position.y;
     _start_pt(2)  = _odom.pose.pose.position.z;
-
-    _start_pt_rounded(0)  = floor(_start_pt(0) / _resolution) * _resolution;
-    _start_pt_rounded(1)  = floor(_start_pt(1) / _resolution) * _resolution;
-    _start_pt_rounded(2)  = floor(_start_pt(2) / _resolution) * _resolution;
 }
 
 void rcvWaypointsCallback(const nav_msgs::Path & wp)
@@ -162,7 +181,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     pcl::PointCloud<pcl::PointXYZI> cloud;  
     pcl::fromROSMsg(pointcloud_map, cloud);
 
-    std::cout << "_start_pt_rounded: " << _start_pt_rounded(0) << ", " << _start_pt_rounded(1) << ", " << _start_pt_rounded(2) << std::endl;
+    std::cout << "_start_pt: " << _start_pt(0) << ", " << _start_pt(1) << ", " << _start_pt(2) << std::endl;
 
     Eigen::Affine3d origin_transform;
     std::string frame;
@@ -170,134 +189,133 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     double x_size = 50;
     double y_size = 50;
     double z_size = 50;
-    float oob_value2 = -INFINITY;
     
-    // Initialize the SDF
-    SignedDistanceField new_sdf(origin_transform, frame, resolution, x_size, y_size, z_size, oob_value2);
-
     unsigned int size_x = (unsigned int)(_max_x_id);
     unsigned int size_y = (unsigned int)(_max_y_id);
     unsigned int size_z = (unsigned int)(_max_z_id);
 
     Coord3D dimsize {size_x, size_y, size_z};
     FMGrid3D grid_fmm_3d(dimsize);
-    grid_fmm_3d.setLeafSize(_resolution);
     
-    unsigned long int idx;
+    grid_fmm_3d.clear();
 
+    double max_vel = _MAX_Vel * 0.75;
+    vector<unsigned int> obs;
+
+    unsigned long int idx;
     unsigned long int index;
 
     for(unsigned long int i = 0; i < size_x*size_y*size_z; i++)
     {
-        grid_fmm_3d[i].setOccupancy(0.0);
+        grid_fmm_3d[i].setOccupancy(-1.0);
     }
 
     // Assign the ESDF
-    for (int idx = 0; idx < (int)cloud.points.size(); idx++)
+    for (unsigned long int idx = 0; idx < cloud.points.size(); idx++)
     {
-        auto mk = cloud.points[idx];
-        new_sdf.SignedDistanceField::Set(mk.x, mk.y, mk.z, mk.intensity);
-
-        unsigned long int  i = (mk.x - _start_pt(0) - _map_origin(0)) * _inv_resolution + 0.5;
-        unsigned long int  j = (mk.y - _start_pt(1) - _map_origin(1)) * _inv_resolution + 0.5;
-        unsigned long int  k = (mk.z - _start_pt(2) - _map_origin(2)) * _inv_resolution + 0.5;
-        
-        index = k * size_y * size_x + j * size_x + i;
-        double d = mk.intensity;
-        grid_fmm_3d[index].setOccupancy(mk.intensity);
-        // std::cout << "PCL Value: " << mk.x << ", " << mk.y << ", " << mk.z << ", " << mk.intensity << std::endl;
+        pcl::PointXYZI mk = cloud.points[idx];
+        unsigned int  i = (mk.x - _start_pt(0) - _map_origin(0)) * _inv_resolution - 0.5;
+        unsigned int  j = (mk.y - _start_pt(1) - _map_origin(1)) * _inv_resolution - 0.5;
+        unsigned int  k = (mk.z - _start_pt(2) - _map_origin(2)) * _inv_resolution - 0.5;
+        index = i + j * size_x + k * size_x * size_y;
+        grid_fmm_3d[index].setOccupancy(mk.intensity / 5.0);
     }
 
-    // Print the ESDF
-    for (int64_t x_index = 0; x_index < new_sdf.GetNumXCells(); x_index++)
+    for(unsigned long int i = 0; i < size_x*size_y*size_z; i++)
     {
-        for (int64_t y_index = 0; y_index < new_sdf.GetNumYCells(); y_index++)
+        if (grid_fmm_3d[i].isOccupied())
         {
-            for (int64_t z_index = 0; z_index < new_sdf.GetNumZCells(); z_index++)
-            {
-                // std::cout << new_sdf.SignedDistanceField::Get(x_index, y_index, z_index);
-            }
+            obs.push_back(i);
         }
     }
 
-    Vector3d startIdx3d = (_start_pt_rounded - _map_origin) * _inv_resolution;
-    Coord3D goal_point = {(unsigned int)startIdx3d[0], (unsigned int)startIdx3d[1], (unsigned int)startIdx3d[2]};
-    unsigned int goalIdx;
-    grid_fmm_3d.coord2idx(goal_point, goalIdx);
-    grid_fmm_3d[goalIdx].setOccupancy(_MAX_Vel);
-    vector<unsigned int> goalIndices;
-    goalIndices.push_back(goalIdx);
-
-    std::cout << "startIdx3d: " << startIdx3d[0] << ", " << startIdx3d[1] << ", " << startIdx3d[2] << ", " << std::endl;
-    
-    Solver<FMGrid3D>* fm_solver = new FMMStar<FMGrid3D>("FMM*_Dist", TIME); // LSM, FMM
-    fm_solver->setEnvironment(&grid_fmm_3d);
-    fm_solver->setInitialPoints(goalIndices);
-
-    ros::Time time_bef_fm = ros::Time::now();
-    if(fm_solver->compute(_MAX_Vel) == -1)
-    {
-        ROS_WARN("[Fast Marching Node] No path can be found");
-        _traj.action = quadrotor_msgs::PolynomialTrajectory::ACTION_WARN_IMPOSSIBLE;
-        _traj_pub.publish(_traj);
-        _has_traj = false;
-
-        return;
-    }
-    ros::Time time_aft_fm = ros::Time::now();
-    ROS_WARN("[Fast Marching Node] Time in Fast Marching computing is %f", (time_aft_fm - time_bef_fm).toSec() );
-
-    Path3D path3D;
-    vector<double> path_vels, time;
-    GradientDescent< FMGrid3D > grad3D;
-
-    if(grad3D.gradient_descent(grid_fmm_3d, goalIdx, path3D, path_vels, time) == -1)
-    {
-        ROS_WARN("[Fast Marching Node] FMM failed, valid path not exists");
-        if(_has_traj && _is_emerg)
-        {
-            _traj.action = quadrotor_msgs::PolynomialTrajectory::ACTION_WARN_IMPOSSIBLE;
-            _traj_pub.publish(_traj);
-            _has_traj = false;
-        }
-        return;
-    }
-    
-    for (int i = 0; i < path3D.size(); i++)
-    {
-        std::cout << "(";
-        for (int j = 0; j < path3D[i].size(); j++)
-        {
-            std::cout << path3D[i][j];
-            if(j != path3D[i].size() - 1)
-            {
-                std::cout << ", ";
-            }
-        }
-        std::cout << ")" << std::endl;
-    }
+    grid_fmm_3d.setOccupiedCells(std::move(obs));
+    grid_fmm_3d.setLeafSize(_resolution);
 
     GridWriter::saveGridValues("test_fm3d.txt", grid_fmm_3d);
+
+
+    Vector3d offset = {1, 0, 0};
+    Vector3d startIdx3d = (- _map_origin) * _inv_resolution;
+    Vector3d endIdx3d   = (offset - _map_origin) * _inv_resolution;
+
+    Coord3D goal_point = {(unsigned int)startIdx3d[0], (unsigned int)startIdx3d[1], (unsigned int)startIdx3d[2]};
+    Coord3D init_point = {(unsigned int)endIdx3d[0],   (unsigned int)endIdx3d[1],   (unsigned int)endIdx3d[2]};
+
+    unsigned int startIdx;
+    vector<unsigned int> startIndices;
+    grid_fmm_3d.coord2idx(init_point, startIdx);
+
+    startIndices.push_back(startIdx);
+
+    unsigned int goalIdx;
+    grid_fmm_3d.coord2idx(goal_point, goalIdx);
+    grid_fmm_3d[goalIdx].setOccupancy(max_vel);
+
+    Solver<FMGrid3D>* fm_solver = new FMMStar<FMGrid3D>("FMM*_Dist", TIME); // LSM, FMM
+
+    fm_solver->setEnvironment(&grid_fmm_3d);
+    fm_solver->setInitialPoints(startIndices);
+    fm_solver->compute(max_vel);
+
+
+
+
+    pcl::PointCloud<pcl::PointXYZI> cloud_esdf;
+    cloud_esdf.height = 1;
+    cloud_esdf.is_dense = true;
+    cloud_esdf.header.frame_id = "odom";
+
+    long int cnt = 0;
+    for(unsigned long int idx = 0; idx < size_x*size_y*size_z; idx++)
+    {
+        // std::cout << "hello" << idx << std::endl;
+        int k = idx / (size_x * size_y);
+        int j = (idx - k * size_x * size_y) / size_x;
+        int i = idx - k * size_x * size_y - j * size_x;
+        pcl::PointXYZI esdf_pt;
+        esdf_pt.x = (i + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
+        esdf_pt.y = (j + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
+        esdf_pt.z = (k + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
+        esdf_pt.intensity = grid_fmm_3d[idx].getOccupancy();
+        // std::cout << fmm_pt.x << ", " << fmm_pt.y << ", " << fmm_pt.z << ", " << fmm_pt.intensity << std::endl;
+        if(esdf_pt.intensity > 0)
+        {
+            cnt++;
+            cloud_esdf.push_back(esdf_pt);
+        }
+    }
+
+    std::cout << "_resolution" << _resolution << std::endl;
+
+    cloud_esdf.width = cnt;
+    std::cout << cnt << std::endl;
+    std::cout << cloud_esdf.points.size() << std::endl;
+
+    sensor_msgs::PointCloud2 esdfMap;
+    pcl::toROSMsg(cloud_esdf, esdfMap);
+    _esdf_map_vis_pub.publish(esdfMap);
+
 
     pcl::PointCloud<pcl::PointXYZI> cloud_fmm;
     cloud_fmm.height = 1;
     cloud_fmm.is_dense = true;
     cloud_fmm.header.frame_id = "odom";
 
-    int cnt = 0;
-    for(unsigned int idx = 0; idx < size_x*size_y*size_z; idx++)
+    cnt = 0;
+    for(unsigned long int idx = 0; idx < size_x*size_y*size_z; idx++)
     {
         // std::cout << "hello" << idx << std::endl;
         int k = idx / (size_x * size_y);
         int j = (idx - k * size_x * size_y) / size_x;
         int i = idx - k * size_x * size_y - j * size_x;
         pcl::PointXYZI fmm_pt;
-        fmm_pt.x = (i + 0.5) * _resolution + _map_origin(0) + _start_pt_rounded(0);
-        fmm_pt.y = (j + 0.5) * _resolution + _map_origin(1) + _start_pt_rounded(1);
-        fmm_pt.z = (k + 0.5) * _resolution + _map_origin(2) + _start_pt_rounded(2);
-        fmm_pt.intensity = grid_fmm_3d.getCell(idx).getArrivalTime();
+        fmm_pt.x = (i + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
+        fmm_pt.y = (j + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
+        fmm_pt.z = (k + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
+        fmm_pt.intensity = grid_fmm_3d[idx].getArrivalTime();
         // std::cout << fmm_pt.x << ", " << fmm_pt.y << ", " << fmm_pt.z << ", " << fmm_pt.intensity << std::endl;
-        if(fmm_pt.intensity < 99999)
+        if(fmm_pt.intensity >= 0 && fmm_pt.intensity < 99999)
         {
             cnt++;
             cloud_fmm.push_back(fmm_pt);
@@ -305,8 +323,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     }
 
     cloud_fmm.width = cnt;
-    // std::cout << cnt << std::endl;
-    // std::cout << cloud_fmm.points.size() << std::endl;
+    std::cout << cnt << std::endl;
+    std::cout << cloud_fmm.points.size() << std::endl;
 
     sensor_msgs::PointCloud2 fmmMap;
     pcl::toROSMsg(cloud_fmm, fmmMap);
@@ -374,6 +392,7 @@ int main(int argc, char** argv)
 
     _inf_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("vis_map_inflate", 1);
     _local_map_vis_pub = nh.advertise<sensor_msgs::PointCloud2>("vis_map_local", 1);
+    _esdf_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("vis_map_esdf", 1);
     _fmm_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("vis_map_fmm", 1);
     _traj_vis_pub      = nh.advertise<visualization_msgs::Marker>("trajectory_vis", 1);
     _corridor_vis_pub  = nh.advertise<visualization_msgs::MarkerArray>("corridor_vis", 1);
