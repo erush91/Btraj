@@ -235,7 +235,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     GridWriter::saveGridValues("test_fm3d.txt", grid_fmm_3d);
 
 
-    Vector3d offset = {1, 0, 0};
+    Vector3d offset = {3, 0, 0};
     Vector3d startIdx3d = (- _map_origin) * _inv_resolution;
     Vector3d endIdx3d   = (offset - _map_origin) * _inv_resolution;
 
@@ -250,7 +250,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     unsigned int goalIdx;
     grid_fmm_3d.coord2idx(goal_point, goalIdx);
-    grid_fmm_3d[goalIdx].setOccupancy(max_vel);
+    // grid_fmm_3d[goalIdx].setOccupancy(max_vel);
 
     Solver<FMGrid3D>* fm_solver = new FMMStar<FMGrid3D>("FMM*_Dist", TIME); // LSM, FMM
 
@@ -266,13 +266,41 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     GradientDescent< FMGrid3D > grad3D;
     grid_fmm_3d.coord2idx(goal_point, goalIdx);
 
-    if(grad3D.gradient_descent(grid_fmm_3d, startIdx, path3D, path_vels, time) == -1)
+    if(grad3D.gradient_descent(grid_fmm_3d, goalIdx, path3D, path_vels, time) == -1)
     {
         std::cout << "GRADIENT DESCENT FMM ERROR" << std::endl;
     }
     else
     {
+        std::cout << "Path3D is :" << std::endl;
+        for (auto pt: path3D)
+        {
+            std::cout << '(';
+            for (int elem : pt)
+            {
+                std::cout << elem << ' ';
+            }
+            std::cout << ')\n';
+        }
+        std::cout << '\n';
+
         _traj_pub.publish(_traj);
+
+
+        vector<Vector3d> path_coord;
+        path_coord.push_back(_start_pt);
+
+        double coord_x, coord_y, coord_z;
+        for( int i = 0; i < (int)path3D.size(); i++)
+        {
+            coord_x = (path3D[i][0] + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
+            coord_y = (path3D[i][1] + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
+            coord_z = (path3D[i][2] + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
+
+            Vector3d pt(coord_x, coord_y, coord_z);
+            path_coord.push_back(pt);
+        }
+        visPath(path_coord);
     }
 
 
