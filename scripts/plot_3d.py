@@ -45,14 +45,14 @@ fig = gcf()
 
 x, y, z = np.mgrid[0:x_size, 0:y_size, 0:z_size]
 
-v = np.zeros((50,50,50))
+v = np.zeros((x_size,y_size,z_size))
 
-for k in range(50):
-    for j in range(50):
-        for i in range(50):
+for k in range(z_size):
+    for j in range(y_size):
+        for i in range(x_size):
             idx = k * y_size * x_size + j * x_size + i
             v[i][j][k] = data[idx]
 
 
-v = data.reshape((50, 50, 50))
+v = data.reshape((x_size, y_size, z_size))
 vol = volume_slice(x, y, z, v, plane_orientation='z_axes')

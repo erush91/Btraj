@@ -30,6 +30,8 @@
 #include "../ndgridmap/ndgridmap.hpp"
 #include "../fm/fmdata/fmcell.h"
 
+using namespace std;
+
 template <typename T>
 T sgn(T val) {
     return (T(0) < val) - (val < T(0));
