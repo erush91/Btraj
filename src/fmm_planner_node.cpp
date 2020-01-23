@@ -194,6 +194,12 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     unsigned int size_y = (unsigned int)(_max_y_id);
     unsigned int size_z = (unsigned int)(_max_z_id);
 
+
+
+    ////////////////////
+    // LOCAL ESDF MAP //
+    ////////////////////
+    
     Coord3D dimsize {size_x, size_y, size_z};
     FMGrid3D grid_fmm_3d(dimsize);
     
@@ -235,6 +241,10 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     GridWriter::saveGridValues("test_fm3d.txt", grid_fmm_3d);
 
 
+    //////////////////////////////////
+    // LOCAL FMM MAP (ARRIVAL TIME) //
+    //////////////////////////////////
+
     Vector3d offset = {3, 0, 0};
     Vector3d startIdx3d = (- _map_origin) * _inv_resolution;
     Vector3d endIdx3d   = (offset - _map_origin) * _inv_resolution;
@@ -250,7 +260,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     unsigned int goalIdx;
     grid_fmm_3d.coord2idx(goal_point, goalIdx);
-    // grid_fmm_3d[goalIdx].setOccupancy(max_vel);
 
     Solver<FMGrid3D>* fm_solver = new FMMStar<FMGrid3D>("FMM*_Dist", TIME); // LSM, FMM
 
@@ -258,13 +267,16 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     fm_solver->setInitialPoints(startIndices);
     fm_solver->compute(max_vel);
 
-
-
+    /////////////////////////////
+    // LOCAL PATH (FMM SOLVER) //
+    /////////////////////////////
 
     Path3D path3D;
     vector<double> path_vels, time;
     GradientDescent< FMGrid3D > grad3D;
     grid_fmm_3d.coord2idx(goal_point, goalIdx);
+
+    vector<Vector3d> path_coord;
 
     if(grad3D.gradient_descent(grid_fmm_3d, goalIdx, path3D, path_vels, time) == -1)
     {
@@ -275,19 +287,16 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         std::cout << "Path3D is :" << std::endl;
         for (auto pt: path3D)
         {
-            std::cout << '(';
             for (int elem : pt)
             {
                 std::cout << elem << ' ';
             }
-            std::cout << ')\n';
+            std::cout << std::endl;
         }
-        std::cout << '\n';
+        std::cout << std::endl;
 
         _traj_pub.publish(_traj);
 
-
-        vector<Vector3d> path_coord;
         path_coord.push_back(_start_pt);
 
         double coord_x, coord_y, coord_z;
@@ -303,10 +312,60 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         visPath(path_coord);
     }
 
+    /////////////////////////
+    // GOAL POINT SELCTION //
+    /////////////////////////
+
+    for(int i = 0; i < int(path_coord.size()); i++)
+    {
+        float path_pt_distance = sqrt((path_coord[i](0) - _start_pt(0))*(path_coord[i](0) - _start_pt(0))
+                                    + (path_coord[i](1) - _start_pt(1))*(path_coord[i](1) - _start_pt(1))
+                                    + (path_coord[i](2) - _start_pt(2))*(path_coord[i](2) - _start_pt(2)));
+        
+        int num_sub_pt_to_check = path_pt_distance * _inv_resolution;
 
 
 
 
+
+        
+            
+        std::cout << "path_pt_distance: " << path_pt_distance << std::endl;
+        std::cout << "num_sub_pt_to_check: " << num_sub_pt_to_check << std::endl;
+
+        Vector3d path_pt = path_coord[i] - _start_pt - _map_origin;
+        std::cout << "path_pt[" << i << "]:" << path_pt(0) << ", " << path_pt(1) << ", " << path_pt(2) << std::endl;
+        
+        Vector3d pathPtIdx3d = path_pt * _inv_resolution;
+        
+        Coord3D path_point = {(unsigned int)pathPtIdx3d[0], (unsigned int)pathPtIdx3d[1], (unsigned int)pathPtIdx3d[2]};
+        std::cout << "pathPtIdx3d[" << i << "]:" << path_point[0] << ", " << path_point[1] << ", " << path_point[2] << std::endl;
+
+        unsigned int pathPtIdx;
+        grid_fmm_3d.coord2idx(path_point, pathPtIdx);
+        float occ = grid_fmm_3d[pathPtIdx].getOccupancy();
+        std::cout << "occ[" << i << "]:" << occ << std::endl;
+
+    }
+
+    // Vector3d test_pt_offset = {0, 4, 0};
+    // Vector3d test_pt =  path_coord[0] + test_pt_offset - _start_pt - _map_origin;
+    // std::cout << "test_pt" << test_pt(0) << ", " << test_pt(1) << ", " << test_pt(2) << std::endl;
+    
+    // Vector3d testPtIdx3d = test_pt * _inv_resolution;
+    
+    // Coord3D test_point = {(unsigned int)testPtIdx3d[0], (unsigned int)testPtIdx3d[1], (unsigned int)testPtIdx3d[2]};
+    // std::cout << "testPtIdx3d:" << test_point[0] << ", " << test_point[1] << ", " << test_point[2] << std::endl;
+
+    // unsigned int testPtIdx;
+    // grid_fmm_3d.coord2idx(test_point, testPtIdx);
+    // float occ_test = grid_fmm_3d[testPtIdx].getOccupancy();
+    // std::cout << "occ_test:" << occ_test << std::endl;
+
+
+    ////////////////////
+    // LOCAL ESDF PCL //
+    ////////////////////
 
     pcl::PointCloud<pcl::PointXYZI> cloud_esdf;
     cloud_esdf.height = 1;
@@ -331,16 +390,18 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         }
     }
 
-    std::cout << "_resolution" << _resolution << std::endl;
-
     cloud_esdf.width = cnt;
-    std::cout << cnt << std::endl;
-    std::cout << cloud_esdf.points.size() << std::endl;
+    std::cout << "cloud_esdf cnt: " << cnt << std::endl;
+    std::cout << "cloud_esdf.points.size: " << cloud_esdf.points.size() << std::endl;
 
     sensor_msgs::PointCloud2 esdfMap;
     pcl::toROSMsg(cloud_esdf, esdfMap);
     _esdf_map_vis_pub.publish(esdfMap);
 
+
+    ///////////////////
+    // LOCAL FMM PCL //
+    ///////////////////
 
     pcl::PointCloud<pcl::PointXYZI> cloud_fmm;
     cloud_fmm.height = 1;
@@ -350,7 +411,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cnt = 0;
     for(unsigned long int idx = 0; idx < size_x*size_y*size_z; idx++)
     {
-        // std::cout << "hello" << idx << std::endl;
         int k = idx / (size_x * size_y);
         int j = (idx - k * size_x * size_y) / size_x;
         int i = idx - k * size_x * size_y - j * size_x;
@@ -367,12 +427,36 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     }
 
     cloud_fmm.width = cnt;
-    std::cout << cnt << std::endl;
-    std::cout << cloud_fmm.points.size() << std::endl;
+    std::cout << "cloud_fmm cnt: " << cnt << std::endl;
+    std::cout << "cloud_fmm.points.size: " << cloud_fmm.points.size() << std::endl;
 
     sensor_msgs::PointCloud2 fmmMap;
     pcl::toROSMsg(cloud_fmm, fmmMap);
     _fmm_map_vis_pub.publish(fmmMap);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 }
 
