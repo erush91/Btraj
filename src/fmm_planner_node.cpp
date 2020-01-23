@@ -185,10 +185,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     Eigen::Affine3d origin_transform;
     std::string frame;
-    double resolution = 0.2;
-    double x_size = 50;
-    double y_size = 50;
-    double z_size = 50;
     
     unsigned int size_x = (unsigned int)(_max_x_id);
     unsigned int size_y = (unsigned int)(_max_y_id);
@@ -205,7 +201,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     
     grid_fmm_3d.clear();
 
-    double max_vel = _MAX_Vel * 0.75;
     vector<unsigned int> obs;
 
     unsigned long int idx;
@@ -245,12 +240,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // LOCAL FMM MAP (ARRIVAL TIME) //
     //////////////////////////////////
 
-    Vector3d offset = {3, 0, 0};
-    Vector3d startIdx3d = (- _map_origin) * _inv_resolution;
-    Vector3d endIdx3d   = (offset - _map_origin) * _inv_resolution;
+    Vector3d endIdx3d   = (       - _map_origin) * _inv_resolution;
 
-    Coord3D goal_point = {(unsigned int)startIdx3d[0], (unsigned int)startIdx3d[1], (unsigned int)startIdx3d[2]};
-    Coord3D init_point = {(unsigned int)endIdx3d[0],   (unsigned int)endIdx3d[1],   (unsigned int)endIdx3d[2]};
+    Coord3D init_point = {(unsigned int)round(endIdx3d[0]),   (unsigned int)round(endIdx3d[1]),   (unsigned int)round(endIdx3d[2])};
 
     unsigned int startIdx;
     vector<unsigned int> startIndices;
@@ -258,110 +250,11 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     startIndices.push_back(startIdx);
 
-    unsigned int goalIdx;
-    grid_fmm_3d.coord2idx(goal_point, goalIdx);
-
     Solver<FMGrid3D>* fm_solver = new FMMStar<FMGrid3D>("FMM*_Dist", TIME); // LSM, FMM
 
     fm_solver->setEnvironment(&grid_fmm_3d);
     fm_solver->setInitialPoints(startIndices);
-    fm_solver->compute(max_vel);
-
-    /////////////////////////////
-    // LOCAL PATH (FMM SOLVER) //
-    /////////////////////////////
-
-    Path3D path3D;
-    vector<double> path_vels, time;
-    GradientDescent< FMGrid3D > grad3D;
-    grid_fmm_3d.coord2idx(goal_point, goalIdx);
-
-    vector<Vector3d> path_coord;
-
-    if(grad3D.gradient_descent(grid_fmm_3d, goalIdx, path3D, path_vels, time) == -1)
-    {
-        std::cout << "GRADIENT DESCENT FMM ERROR" << std::endl;
-    }
-    else
-    {
-        std::cout << "Path3D is :" << std::endl;
-        for (auto pt: path3D)
-        {
-            for (int elem : pt)
-            {
-                std::cout << elem << ' ';
-            }
-            std::cout << std::endl;
-        }
-        std::cout << std::endl;
-
-        _traj_pub.publish(_traj);
-
-        path_coord.push_back(_start_pt);
-
-        double coord_x, coord_y, coord_z;
-        for( int i = 0; i < (int)path3D.size(); i++)
-        {
-            coord_x = (path3D[i][0] + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
-            coord_y = (path3D[i][1] + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
-            coord_z = (path3D[i][2] + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
-
-            Vector3d pt(coord_x, coord_y, coord_z);
-            path_coord.push_back(pt);
-        }
-        visPath(path_coord);
-    }
-
-    /////////////////////////
-    // GOAL POINT SELCTION //
-    /////////////////////////
-
-    for(int i = 0; i < int(path_coord.size()); i++)
-    {
-        float path_pt_distance = sqrt((path_coord[i](0) - _start_pt(0))*(path_coord[i](0) - _start_pt(0))
-                                    + (path_coord[i](1) - _start_pt(1))*(path_coord[i](1) - _start_pt(1))
-                                    + (path_coord[i](2) - _start_pt(2))*(path_coord[i](2) - _start_pt(2)));
-        
-        int num_sub_pt_to_check = path_pt_distance * _inv_resolution;
-
-
-
-
-
-        
-            
-        std::cout << "path_pt_distance: " << path_pt_distance << std::endl;
-        std::cout << "num_sub_pt_to_check: " << num_sub_pt_to_check << std::endl;
-
-        Vector3d path_pt = path_coord[i] - _start_pt - _map_origin;
-        std::cout << "path_pt[" << i << "]:" << path_pt(0) << ", " << path_pt(1) << ", " << path_pt(2) << std::endl;
-        
-        Vector3d pathPtIdx3d = path_pt * _inv_resolution;
-        
-        Coord3D path_point = {(unsigned int)pathPtIdx3d[0], (unsigned int)pathPtIdx3d[1], (unsigned int)pathPtIdx3d[2]};
-        std::cout << "pathPtIdx3d[" << i << "]:" << path_point[0] << ", " << path_point[1] << ", " << path_point[2] << std::endl;
-
-        unsigned int pathPtIdx;
-        grid_fmm_3d.coord2idx(path_point, pathPtIdx);
-        float occ = grid_fmm_3d[pathPtIdx].getOccupancy();
-        std::cout << "occ[" << i << "]:" << occ << std::endl;
-
-    }
-
-    // Vector3d test_pt_offset = {0, 4, 0};
-    // Vector3d test_pt =  path_coord[0] + test_pt_offset - _start_pt - _map_origin;
-    // std::cout << "test_pt" << test_pt(0) << ", " << test_pt(1) << ", " << test_pt(2) << std::endl;
-    
-    // Vector3d testPtIdx3d = test_pt * _inv_resolution;
-    
-    // Coord3D test_point = {(unsigned int)testPtIdx3d[0], (unsigned int)testPtIdx3d[1], (unsigned int)testPtIdx3d[2]};
-    // std::cout << "testPtIdx3d:" << test_point[0] << ", " << test_point[1] << ", " << test_point[2] << std::endl;
-
-    // unsigned int testPtIdx;
-    // grid_fmm_3d.coord2idx(test_point, testPtIdx);
-    // float occ_test = grid_fmm_3d[testPtIdx].getOccupancy();
-    // std::cout << "occ_test:" << occ_test << std::endl;
-
+    fm_solver->compute(1.0);
 
     ////////////////////
     // LOCAL ESDF PCL //
@@ -437,6 +330,108 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
 
 
+
+
+    /////////////////////////////
+    // LOCAL PATH (FMM SOLVER) //
+    /////////////////////////////
+
+    Vector3d offset = {3, 0, 0};
+    Vector3d startIdx3d = (offset - _map_origin) * _inv_resolution;
+    Coord3D goal_point = {(unsigned int)round(startIdx3d[0]), (unsigned int)round(startIdx3d[1]), (unsigned int)round(startIdx3d[2])};
+    unsigned int goalIdx;
+    grid_fmm_3d.coord2idx(goal_point, goalIdx);
+
+    Path3D path3D;
+    vector<double> path_vels, time;
+    GradientDescent< FMGrid3D > grad3D;
+    grid_fmm_3d.coord2idx(goal_point, goalIdx);
+
+    vector<Vector3d> path_coord;
+
+    if(grad3D.gradient_descent(grid_fmm_3d, goalIdx, path3D, path_vels, time) == -1)
+    {
+        std::cout << "GRADIENT DESCENT FMM ERROR" << std::endl;
+    }
+    else
+    {
+        std::cout << "Path3D is :" << std::endl;
+        for (auto pt: path3D)
+        {
+            for (int elem : pt)
+            {
+                std::cout << elem << ' ';
+            }
+            std::cout << std::endl;
+        }
+        std::cout << std::endl;
+
+        _traj_pub.publish(_traj);
+
+        path_coord.push_back(_start_pt);
+
+        double coord_x, coord_y, coord_z;
+        for( int i = 0; i < (int)path3D.size(); i++)
+        {
+            coord_x = (path3D[i][0] + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
+            coord_y = (path3D[i][1] + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
+            coord_z = (path3D[i][2] + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
+
+            Vector3d pt(coord_x, coord_y, coord_z);
+            path_coord.push_back(pt);
+        }
+        visPath(path_coord);
+    }
+
+    /////////////////////////
+    // GOAL POINT SELCTION //
+    /////////////////////////
+
+    for(int i = 0; i < int(path_coord.size()); i++)
+    {
+        float path_pt_distance = sqrt((path_coord[i](0) - _start_pt(0))*(path_coord[i](0) - _start_pt(0))
+                                    + (path_coord[i](1) - _start_pt(1))*(path_coord[i](1) - _start_pt(1))
+                                    + (path_coord[i](2) - _start_pt(2))*(path_coord[i](2) - _start_pt(2)));
+        
+        int num_sub_pt_to_check = path_pt_distance * _inv_resolution;
+
+
+
+
+
+
+            
+        std::cout << "path_pt_distance: " << path_pt_distance << std::endl;
+        std::cout << "num_sub_pt_to_check: " << num_sub_pt_to_check << std::endl;
+
+        Vector3d path_pt = path_coord[i] - _start_pt - _map_origin;
+        std::cout << "path_pt[" << i << "]:" << path_pt(0) << ", " << path_pt(1) << ", " << path_pt(2) << std::endl;
+        
+        Vector3d pathPtIdx3d = path_pt * _inv_resolution;
+        
+        Coord3D path_point = {(unsigned int)pathPtIdx3d[0], (unsigned int)pathPtIdx3d[1], (unsigned int)pathPtIdx3d[2]};
+        std::cout << "pathPtIdx3d[" << i << "]:" << path_point[0] << ", " << path_point[1] << ", " << path_point[2] << std::endl;
+
+        unsigned int pathPtIdx;
+        grid_fmm_3d.coord2idx(path_point, pathPtIdx);
+        float occ = grid_fmm_3d[pathPtIdx].getOccupancy();
+        std::cout << "occ[" << i << "]:" << occ << std::endl;
+
+    }
+
+    // Vector3d test_pt_offset = {0, 4, 0};
+    // Vector3d test_pt =  path_coord[0] + test_pt_offset - _start_pt - _map_origin;
+    // std::cout << "test_pt" << test_pt(0) << ", " << test_pt(1) << ", " << test_pt(2) << std::endl;
+    
+    // Vector3d testPtIdx3d = test_pt * _inv_resolution;
+    
+    // Coord3D test_point = {(unsigned int)testPtIdx3d[0], (unsigned int)testPtIdx3d[1], (unsigned int)testPtIdx3d[2]};
+    // std::cout << "testPtIdx3d:" << test_point[0] << ", " << test_point[1] << ", " << test_point[2] << std::endl;
+
+    // unsigned int testPtIdx;
+    // grid_fmm_3d.coord2idx(test_point, testPtIdx);
+    // float occ_test = grid_fmm_3d[testPtIdx].getOccupancy();
+    // std::cout << "occ_test:" << occ_test << std::endl;
 
 
 
@@ -537,7 +532,7 @@ int main(int argc, char** argv)
 
     nh.param("map/x_size",       _x_size, 50.0);
     nh.param("map/y_size",       _y_size, 50.0);
-    nh.param("map/z_size",       _z_size, 5.0 );
+    nh.param("map/z_size",       _z_size, 50.0 );
 
     nh.param("map/x_local_size", _x_local_size, 20.0);
     nh.param("map/y_local_size", _y_local_size, 20.0);
