@@ -119,9 +119,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     for (unsigned long int pcl_idx = 0; pcl_idx < cloud.points.size(); pcl_idx++)
     {
         pcl::PointXYZI mk = cloud.points[pcl_idx];
-        unsigned int  x_idx = round((mk.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
-        unsigned int  y_idx = round((mk.y - _start_pt(1) - _map_origin(1)) * _inv_resolution);
-        unsigned int  z_idx = round((mk.z - _start_pt(2) - _map_origin(2)) * _inv_resolution);
+        unsigned int  x_idx = ((mk.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
+        unsigned int  y_idx = ((mk.y - _start_pt(1) - _map_origin(1)) * _inv_resolution);
+        unsigned int  z_idx = ((mk.z - _start_pt(2) - _map_origin(2)) * _inv_resolution);
         unsigned long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
         grid_fmm_3d[grid_idx].setOccupancy(mk.intensity / 5.0);
     }
@@ -170,11 +170,11 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cloud_esdf.header.frame_id = "odom";
 
     long int cnt = 0;
-    for(unsigned long int grid_idx = 0; grid_idx < x_size*y_size*z_size; grid_idx++)
+    for(unsigned long int grid_idx = 0; grid_idx < x_size * y_size * z_size; grid_idx++)
     {
-        int z_idx = grid_idx / (x_size * y_size);
+        int z_idx =  grid_idx / (x_size * y_size);
         int y_idx = (grid_idx - z_idx * x_size * y_size) / x_size;
-        int x_idx = grid_idx - z_idx * x_size * y_size - y_idx * x_size;
+        int x_idx =  grid_idx - z_idx * x_size * y_size - y_idx * x_size;
         pcl::PointXYZI esdf_pt;
         esdf_pt.x = (x_idx + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
         esdf_pt.y = (y_idx + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
@@ -208,16 +208,16 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cloud_fmm.header.frame_id = "odom";
 
     cnt = 0;
-    for(unsigned long int grid_idx = 0; grid_idx < x_size*y_size*z_size; grid_idx++)
+    for(unsigned long int grid_idx = 0; grid_idx < x_size * y_size * z_size; grid_idx++)
     {
         int z_idx =  grid_idx / (x_size * y_size);
         int y_idx = (grid_idx - z_idx * x_size * y_size) / x_size;
         int x_idx =  grid_idx - z_idx * x_size * y_size - y_idx * x_size;
         pcl::PointXYZI fmm_pt;
         fmm_pt.x = (x_idx + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
-        fmm_pt.y = (y_idx + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(0) + _map_origin(1);
-        fmm_pt.z = (z_idx + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(0) + _map_origin(2);
-        fmm_pt.intensity = grid_fmm_3d[grid_idx].getArrivalTime();
+        fmm_pt.y = (y_idx + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
+        fmm_pt.z = (z_idx + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(2) + _map_origin(2);
+        fmm_pt.intensity = grid_fmm_3d[grid_idx].getOccupancy();
         if(fmm_pt.intensity >= 0 && fmm_pt.intensity < 99999)
         {
             cnt++;
@@ -404,9 +404,9 @@ int main(int argc, char** argv)
     _inv_resolution = 1.0 / _resolution;
 
     // This is the maximum indeces in the map
-    _max_x_idx = (int)(_x_size * _inv_resolution) + 1;
-    _max_y_idx = (int)(_y_size * _inv_resolution) + 1;
-    _max_z_idx = (int)(_z_size * _inv_resolution) + 1;
+    _max_x_idx = (int)(_x_size * _inv_resolution) ;
+    _max_y_idx = (int)(_y_size * _inv_resolution) ;
+    _max_z_idx = (int)(_z_size * _inv_resolution) ;
 
     ros::Rate rate(100);
     bool status = ros::ok();
