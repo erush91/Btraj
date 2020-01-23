@@ -87,45 +87,43 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     std::string frame;
     
-    unsigned int size_x = (unsigned int)(_max_x_idx);
-    unsigned int size_y = (unsigned int)(_max_y_idx);
-    unsigned int size_z = (unsigned int)(_max_z_idx);
+    unsigned int x_size = (unsigned int)(_max_x_idx);
+    unsigned int y_size = (unsigned int)(_max_y_idx);
+    unsigned int z_size = (unsigned int)(_max_z_idx);
 
     ////////////////////
     // LOCAL ESDF MAP //
     ////////////////////
     
-    Coord3D dimsize {size_x, size_y, size_z};
+    Coord3D dimsize {x_size, y_size, z_size};
     FMGrid3D grid_fmm_3d(dimsize);
     
     grid_fmm_3d.clear();
 
     vector<unsigned int> obs;
 
-    unsigned long int idx;
-    unsigned long int index;
 
-    for(unsigned long int i = 0; i < size_x * size_y * size_z; i++)
+    for(unsigned long int grid_idx = 0; grid_idx < x_size * y_size * z_size; grid_idx++)
     {
-        grid_fmm_3d[i].setOccupancy(-1.0);
+        grid_fmm_3d[grid_idx].setOccupancy(-1.0);
     }
 
     // Assign the ESDF
-    for (unsigned long int idx = 0; idx < cloud.points.size(); idx++)
+    for (unsigned long int pcl_idx = 0; pcl_idx < cloud.points.size(); pcl_idx++)
     {
-        pcl::PointXYZI mk = cloud.points[idx];
-        unsigned int  i = (mk.x - _start_pt(0) - _map_origin(0)) * _inv_resolution - 0.5;
-        unsigned int  j = (mk.y - _start_pt(1) - _map_origin(1)) * _inv_resolution - 0.5;
-        unsigned int  k = (mk.z - _start_pt(2) - _map_origin(2)) * _inv_resolution - 0.5;
-        index = i + j * size_x + k * size_x * size_y;
-        grid_fmm_3d[index].setOccupancy(mk.intensity / 5.0);
+        pcl::PointXYZI mk = cloud.points[pcl_idx];
+        unsigned int  x_idx = (mk.x - _start_pt(0) - _map_origin(0)) * _inv_resolution - 0.5;
+        unsigned int  y_idx = (mk.y - _start_pt(1) - _map_origin(1)) * _inv_resolution - 0.5;
+        unsigned int  z_idx = (mk.z - _start_pt(2) - _map_origin(2)) * _inv_resolution - 0.5;
+        unsigned long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
+        grid_fmm_3d[grid_idx].setOccupancy(mk.intensity / 5.0);
     }
 
-    for(unsigned long int i = 0; i < size_x*size_y*size_z; i++)
+    for(unsigned long int grid_idx = 0; grid_idx < x_size*y_size*z_size; grid_idx++)
     {
-        if (grid_fmm_3d[i].isOccupied())
+        if (grid_fmm_3d[grid_idx].isOccupied())
         {
-            obs.push_back(i);
+            obs.push_back(grid_idx);
         }
     }
 
@@ -165,16 +163,16 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cloud_esdf.header.frame_id = "odom";
 
     long int cnt = 0;
-    for(unsigned long int idx = 0; idx < size_x*size_y*size_z; idx++)
+    for(unsigned long int grid_idx = 0; grid_idx < x_size*y_size*z_size; grid_idx++)
     {
-        int k = idx / (size_x * size_y);
-        int j = (idx - k * size_x * size_y) / size_x;
-        int i = idx - k * size_x * size_y - j * size_x;
+        int z_idx = grid_idx / (x_size * y_size);
+        int y_idx = (grid_idx - z_idx * x_size * y_size) / x_size;
+        int x_idx = grid_idx - z_idx * x_size * y_size - y_idx * x_size;
         pcl::PointXYZI esdf_pt;
-        esdf_pt.x = (i + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
-        esdf_pt.y = (j + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
-        esdf_pt.z = (k + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
-        esdf_pt.intensity = grid_fmm_3d[idx].getOccupancy();
+        esdf_pt.x = (x_idx + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
+        esdf_pt.y = (y_idx + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
+        esdf_pt.z = (z_idx + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
+        esdf_pt.intensity = grid_fmm_3d[grid_idx].getOccupancy();
         if(esdf_pt.intensity > 0)
         {
             cnt++;
@@ -201,16 +199,16 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cloud_fmm.header.frame_id = "odom";
 
     cnt = 0;
-    for(unsigned long int idx = 0; idx < size_x*size_y*size_z; idx++)
+    for(unsigned long int grid_idx = 0; grid_idx < x_size*y_size*z_size; grid_idx++)
     {
-        int k = idx / (size_x * size_y);
-        int j = (idx - k * size_x * size_y) / size_x;
-        int i = idx - k * size_x * size_y - j * size_x;
+        int z_idx =  grid_idx / (x_size * y_size);
+        int y_idx = (grid_idx - z_idx * x_size * y_size) / x_size;
+        int x_idx =  grid_idx - z_idx * x_size * y_size - y_idx * x_size;
         pcl::PointXYZI fmm_pt;
-        fmm_pt.x = (i + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
-        fmm_pt.y = (j + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
-        fmm_pt.z = (k + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
-        fmm_pt.intensity = grid_fmm_3d[idx].getArrivalTime();
+        fmm_pt.x = (x_idx + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
+        fmm_pt.y = (y_idx + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
+        fmm_pt.z = (z_idx + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
+        fmm_pt.intensity = grid_fmm_3d[grid_idx].getArrivalTime();
         if(fmm_pt.intensity >= 0 && fmm_pt.intensity < 99999)
         {
             cnt++;
@@ -268,11 +266,11 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         path_coord.push_back(_start_pt);
 
         double coord_x, coord_y, coord_z;
-        for( int i = 0; i < (int)path3D.size(); i++)
+        for(int path_idx = 0; path_idx < (int)path3D.size(); path_idx++)
         {
-            coord_x = (path3D[i][0] + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
-            coord_y = (path3D[i][1] + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
-            coord_z = (path3D[i][2] + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
+            coord_x = (path3D[path_idx][0] + 0.5) * _resolution + _start_pt(0) + _map_origin(0);
+            coord_y = (path3D[path_idx][1] + 0.5) * _resolution + _start_pt(1) + _map_origin(1);
+            coord_z = (path3D[path_idx][2] + 0.5) * _resolution + _start_pt(2) + _map_origin(2);
 
             Vector3d pt(coord_x, coord_y, coord_z);
             path_coord.push_back(pt);
@@ -284,16 +282,13 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // GOAL POINT SELCTION //
     /////////////////////////
 
-    for(int i = 0; i < int(path_coord.size()); i++)
+    for(int path_idx = 0; path_idx < int(path_coord.size()); path_idx++)
     {
-        float path_pt_distance = sqrt((path_coord[i](0) - _start_pt(0))*(path_coord[i](0) - _start_pt(0))
-                                    + (path_coord[i](1) - _start_pt(1))*(path_coord[i](1) - _start_pt(1))
-                                    + (path_coord[i](2) - _start_pt(2))*(path_coord[i](2) - _start_pt(2)));
+        float path_pt_distance = sqrt((path_coord[path_idx](0) - _start_pt(0))*(path_coord[path_idx](0) - _start_pt(0))
+                                    + (path_coord[path_idx](1) - _start_pt(1))*(path_coord[path_idx](1) - _start_pt(1))
+                                    + (path_coord[path_idx](2) - _start_pt(2))*(path_coord[path_idx](2) - _start_pt(2)));
         
         int num_sub_pt_to_check = path_pt_distance * _inv_resolution;
-
-
-
 
 
 
@@ -301,18 +296,18 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         std::cout << "path_pt_distance: " << path_pt_distance << std::endl;
         std::cout << "num_sub_pt_to_check: " << num_sub_pt_to_check << std::endl;
 
-        Vector3d path_pt = path_coord[i] - _start_pt - _map_origin;
-        std::cout << "path_pt[" << i << "]:" << path_pt(0) << ", " << path_pt(1) << ", " << path_pt(2) << std::endl;
+        Vector3d path_pt = path_coord[path_idx] - _start_pt - _map_origin;
+        std::cout << "path_pt[" << path_idx << "]:" << path_pt(0) << ", " << path_pt(1) << ", " << path_pt(2) << std::endl;
         
         Vector3d pathPtIdx3d = path_pt * _inv_resolution;
         
         Coord3D path_point = {(unsigned int)pathPtIdx3d[0], (unsigned int)pathPtIdx3d[1], (unsigned int)pathPtIdx3d[2]};
-        std::cout << "pathPtIdx3d[" << i << "]:" << path_point[0] << ", " << path_point[1] << ", " << path_point[2] << std::endl;
+        std::cout << "pathPtIdx3d[" << path_idx << "]:" << path_point[0] << ", " << path_point[1] << ", " << path_point[2] << std::endl;
 
         unsigned int pathPtIdx;
         grid_fmm_3d.coord2idx(path_point, pathPtIdx);
         float occ = grid_fmm_3d[pathPtIdx].getOccupancy();
-        std::cout << "occ[" << i << "]:" << occ << std::endl;
+        std::cout << "occ[" << path_idx << "]:" << occ << std::endl;
         std::cout << std::endl;
 
     }
@@ -410,20 +405,18 @@ void visPath(vector<Vector3d> path)
     mk.color.g = 0.647;
     mk.color.b = 0.0;
 
-    int idx = 0;
-    for(int i = 0; i < int(path.size()); i++)
+    for(int path_idx = 0; path_idx < int(path.size()); path_idx++)
     {
-        mk.id = idx;
+        mk.id = path_idx;
 
-        mk.pose.position.x = path[i](0);
-        mk.pose.position.y = path[i](1);
-        mk.pose.position.z = path[i](2);
+        mk.pose.position.x = path[path_idx](0);
+        mk.pose.position.y = path[path_idx](1);
+        mk.pose.position.z = path[path_idx](2);
 
         mk.scale.x = _resolution;
         mk.scale.y = _resolution;
         mk.scale.z = _resolution;
 
-        idx ++;
         path_vis.markers.push_back(mk);
     }
 
