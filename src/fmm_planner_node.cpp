@@ -58,7 +58,7 @@ Vector3d _start_pt, _start_pt_rounding_eror;
 Vector3d _map_origin;
 double _x_size, _y_size, _z_size;
 int _max_x_idx, _max_y_idx, _max_z_idx;
-long int _max_grid_idx;
+unsigned long int _max_grid_idx;
 
 // ROS
 ros::Subscriber _map_sub, _pts_sub, _odom_sub;
@@ -114,17 +114,19 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
-        grid_fmm_3d[grid_idx].setOccupancy(-1.0);
+        grid_fmm_3d[grid_idx].setOccupancy(0.0);
     }
 
+    long int cntt2 = 0;
     // Assign the ESDF
-    for (long int pcl_idx = 0; pcl_idx < cloud.points.size(); pcl_idx++)
+    for (unsigned long int pcl_idx = 0; pcl_idx < cloud.points.size(); pcl_idx++)
     {
+        cntt2++;
         pcl::PointXYZI mk = cloud.points[pcl_idx];
         int  x_idx = ((mk.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
         int  y_idx = ((mk.y - _start_pt(1) - _map_origin(1)) * _inv_resolution);
         int  z_idx = ((mk.z - _start_pt(2) - _map_origin(2)) * _inv_resolution);
-        long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
+        unsigned long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
 
         if(x_idx >= 0 && x_idx < _max_x_idx)
         {
@@ -137,25 +139,27 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             }
         }
     }
+    std::cout << cntt2 << std::endl;
 
-    for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
+    long int cntt = 0;
+    for(unsigned long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
         if (grid_fmm_3d[grid_idx].isOccupied())
         {
+            cntt++;
             obs.push_back(grid_idx);
         }
     }
-
     grid_fmm_3d.setOccupiedCells(std::move(obs));
     grid_fmm_3d.setLeafSize(_resolution);
 
-    GridWriter::saveGridValues("test_fm3d.txt", grid_fmm_3d);
+    std::cout << cntt << std::endl;
 
     //////////////////////////////////
     // LOCAL FMM MAP (ARRIVAL TIME) //
     //////////////////////////////////
 
-    Vector3d endIdx3d   = - _map_origin * _inv_resolution;
+    Vector3d endIdx3d = - _map_origin * _inv_resolution;
 
     Coord3D init_point = {(unsigned int)round(endIdx3d[0]), (unsigned int)round(endIdx3d[1]), (unsigned int)round(endIdx3d[2])};
 
@@ -169,7 +173,11 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     fm_solver->setEnvironment(&grid_fmm_3d);
     fm_solver->setInitialPoints(startIndices);
+    fm_solver->setup();
     fm_solver->compute(1.0);
+
+    // Preventing memory leaks.
+    delete fm_solver;
 
     ////////////////////
     // LOCAL ESDF PCL //
@@ -228,8 +236,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         fmm_pt.x = (x_idx + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
         fmm_pt.y = (y_idx + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
         fmm_pt.z = (z_idx + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(2) + _map_origin(2);
-        fmm_pt.intensity = grid_fmm_3d[grid_idx].getOccupancy();
-        if(fmm_pt.intensity >= 0 && fmm_pt.intensity < 99999)
+        fmm_pt.intensity = grid_fmm_3d[grid_idx].getArrivalTime(); // ARRIVAL TIME ()
+        if(fmm_pt.intensity > 0 && fmm_pt.intensity < 99999)
         {
             cnt++;
             cloud_fmm.push_back(fmm_pt);
@@ -304,6 +312,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     }
 
+
+    GridWriter::saveGridValues("test_fm3d.txt", grid_fmm_3d);
+    
     std::cout << "path3D.size(): " << path3D.size() << std::endl;
     std::cout << "cnt2: " << cnt2 << std::endl;
 
