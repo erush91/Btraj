@@ -58,6 +58,7 @@ Vector3d _start_pt, _start_pt_rounding_eror;
 Vector3d _map_origin;
 double _x_size, _y_size, _z_size;
 int _max_x_idx, _max_y_idx, _max_z_idx;
+long int _max_grid_idx;
 
 // ROS
 ros::Subscriber _map_sub, _pts_sub, _odom_sub;
@@ -94,9 +95,10 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     std::string frame;
     
-    unsigned int x_size = (unsigned int)(_max_x_idx);
-    unsigned int y_size = (unsigned int)(_max_y_idx);
-    unsigned int z_size = (unsigned int)(_max_z_idx);
+    int x_size = (int)(_max_x_idx);
+    int y_size = (int)(_max_y_idx);
+    int z_size = (int)(_max_z_idx);
+    
 
     ////////////////////
     // LOCAL ESDF MAP //
@@ -110,23 +112,33 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     vector<unsigned int> obs;
 
 
-    for(unsigned long int grid_idx = 0; grid_idx < x_size * y_size * z_size; grid_idx++)
+    for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
         grid_fmm_3d[grid_idx].setOccupancy(-1.0);
     }
 
     // Assign the ESDF
-    for (unsigned long int pcl_idx = 0; pcl_idx < cloud.points.size(); pcl_idx++)
+    for (long int pcl_idx = 0; pcl_idx < cloud.points.size(); pcl_idx++)
     {
         pcl::PointXYZI mk = cloud.points[pcl_idx];
-        unsigned int  x_idx = ((mk.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
-        unsigned int  y_idx = ((mk.y - _start_pt(1) - _map_origin(1)) * _inv_resolution);
-        unsigned int  z_idx = ((mk.z - _start_pt(2) - _map_origin(2)) * _inv_resolution);
-        unsigned long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
-        grid_fmm_3d[grid_idx].setOccupancy(mk.intensity / 5.0);
+        int  x_idx = ((mk.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
+        int  y_idx = ((mk.y - _start_pt(1) - _map_origin(1)) * _inv_resolution);
+        int  z_idx = ((mk.z - _start_pt(2) - _map_origin(2)) * _inv_resolution);
+        long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
+
+        if(x_idx >= 0 && x_idx < _max_x_idx)
+        {
+            if(y_idx >= 0 && y_idx < _max_y_idx)
+            {
+                if(z_idx >= 0 && z_idx < _max_z_idx)
+                {
+                    grid_fmm_3d[grid_idx].setOccupancy(mk.intensity / 5.0);
+                }
+            }
+        }
     }
 
-    for(unsigned long int grid_idx = 0; grid_idx < x_size*y_size*z_size; grid_idx++)
+    for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
         if (grid_fmm_3d[grid_idx].isOccupied())
         {
@@ -138,7 +150,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     grid_fmm_3d.setLeafSize(_resolution);
 
     GridWriter::saveGridValues("test_fm3d.txt", grid_fmm_3d);
-
 
     //////////////////////////////////
     // LOCAL FMM MAP (ARRIVAL TIME) //
@@ -170,7 +181,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cloud_esdf.header.frame_id = "odom";
 
     long int cnt = 0;
-    for(unsigned long int grid_idx = 0; grid_idx < x_size * y_size * z_size; grid_idx++)
+    for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
         int z_idx =  grid_idx / (x_size * y_size);
         int y_idx = (grid_idx - z_idx * x_size * y_size) / x_size;
@@ -208,7 +219,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cloud_fmm.header.frame_id = "odom";
 
     cnt = 0;
-    for(unsigned long int grid_idx = 0; grid_idx < x_size * y_size * z_size; grid_idx++)
+    for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
         int z_idx =  grid_idx / (x_size * y_size);
         int y_idx = (grid_idx - z_idx * x_size * y_size) / x_size;
@@ -234,9 +245,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     sensor_msgs::PointCloud2 fmmMap;
     pcl::toROSMsg(cloud_fmm, fmmMap);
     _fmm_map_vis_pub.publish(fmmMap);
-
-
-
 
 
 
@@ -404,9 +412,10 @@ int main(int argc, char** argv)
     _inv_resolution = 1.0 / _resolution;
 
     // This is the maximum indeces in the map
-    _max_x_idx = (int)(_x_size * _inv_resolution) ;
-    _max_y_idx = (int)(_y_size * _inv_resolution) ;
-    _max_z_idx = (int)(_z_size * _inv_resolution) ;
+    _max_x_idx = (int)(_x_size * _inv_resolution);
+    _max_y_idx = (int)(_y_size * _inv_resolution);
+    _max_z_idx = (int)(_z_size * _inv_resolution);
+    _max_grid_idx = _max_x_idx * _max_y_idx * _max_z_idx;
 
     ros::Rate rate(100);
     bool status = ros::ok();

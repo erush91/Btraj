@@ -8,6 +8,9 @@ import cv2
 
 from mayavi.mlab import *
 
+# If you want to use Matplotlibs interactive plotting with Mayavis mlab in IPython you should
+# $ ipython --matplotlib=qt
+
 filepath = '/home/erush91/.ros/test_fm3d.txt'
 
 with open(filepath) as fp:
