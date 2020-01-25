@@ -71,24 +71,47 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom);
 void visPath(vector<Vector3d> path);
 double velMapping(double d);
 
-double velMapping(double d)
+int main(int argc, char** argv)
 {
-    double vel;
+    ros::init(argc, argv, "b_traj_node");
+    ros::NodeHandle nh("~");
 
-    if( d <= 0.7)
+    _map_sub  = nh.subscribe( "map",       1, rcvPointCloudCallBack );
+    _odom_sub = nh.subscribe( "odometry",  1, rcvOdometryCallbck);
+
+    _esdf_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("map/fmm/velocity", 1);
+    _fmm_map_vis_pub    = nh.advertise<sensor_msgs::PointCloud2>("map/fmm/arrival_time", 1);
+    _fm_path_vis_pub    = nh.advertise<visualization_msgs::MarkerArray>("goal/path/viz", 1);
+
+    nh.param("map/resolution",  _resolution, 0.2);
+    nh.param("map/x_size",      _x_size, 50.0);
+    nh.param("map/y_size",      _y_size, 50.0);
+    nh.param("map/z_size",      _z_size, 50.0);
+
+    // Origin is located in the middle of the map
+    _map_origin = {- _x_size / 2.0, - _y_size / 2.0 , - _z_size / 2.0};
+
+    // Inverse resolution
+    _inv_resolution = 1.0 / _resolution;
+
+    // This is the maximum indeces in the map
+    _max_x_idx = (int)(_x_size * _inv_resolution);
+    _max_y_idx = (int)(_y_size * _inv_resolution);
+    _max_z_idx = (int)(_z_size * _inv_resolution);
+    _max_grid_idx = _max_x_idx * _max_y_idx * _max_z_idx;
+
+    ros::Rate rate(100);
+    bool status = ros::ok();
+    while(status)
     {
-        vel = 0.3;
+        ros::spinOnce();           
+        status = ros::ok();
+        rate.sleep();
     }
-    else if( d <= 1.4)
-    {
-        vel = 1 * d - 0.4;
-    }
-    else
-    {
-        vel = 1.0;
-    }
-    return vel;
+
+    return 0;
 }
+
 
 void rcvOdometryCallbck(const nav_msgs::Odometry odom)
 {
@@ -396,62 +419,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     std::cout << std::endl;
     std::cout << std::endl;
     
-    // Vector3d test_pt_offset = {0, 4, 0};
-    // Vector3d test_pt =  path_coord[0] + test_pt_offset - _start_pt - _map_origin;
-    // std::cout << "test_pt" << test_pt(0) << ", " << test_pt(1) << ", " << test_pt(2) << std::endl;
-    
-    // Vector3d testPtIdx3d = test_pt * _inv_resolution;
-    
-    // Coord3D test_point = {(unsigned int)testPtIdx3d[0], (unsigned int)testPtIdx3d[1], (unsigned int)testPtIdx3d[2]};
-    // std::cout << "testPtIdx3d:" << test_point[0] << ", " << test_point[1] << ", " << test_point[2] << std::endl;
-
-    // unsigned int testPtIdx;
-    // grid_fmm_3d.coord2idx(test_point, testPtIdx);
-    // float occ_test = grid_fmm_3d[testPtIdx].getOccupancy();
-    // std::cout << "occ_test:" << occ_test << std::endl;
-
 }
 
-int main(int argc, char** argv)
-{
-    ros::init(argc, argv, "b_traj_node");
-    ros::NodeHandle nh("~");
-
-    _map_sub  = nh.subscribe( "map",       1, rcvPointCloudCallBack );
-    _odom_sub = nh.subscribe( "odometry",  1, rcvOdometryCallbck);
-
-    _esdf_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("map/fmm/velocity", 1);
-    _fmm_map_vis_pub    = nh.advertise<sensor_msgs::PointCloud2>("map/fmm/arrival_time", 1);
-    _fm_path_vis_pub    = nh.advertise<visualization_msgs::MarkerArray>("goal/path/viz", 1);
-
-    nh.param("map/resolution",  _resolution, 0.2);
-    nh.param("map/x_size",      _x_size, 50.0);
-    nh.param("map/y_size",      _y_size, 50.0);
-    nh.param("map/z_size",      _z_size, 50.0);
-
-    // Origin is located in the middle of the map
-    _map_origin = {- _x_size / 2.0, - _y_size / 2.0 , - _z_size / 2.0};
-
-    // Inverse resolution
-    _inv_resolution = 1.0 / _resolution;
-
-    // This is the maximum indeces in the map
-    _max_x_idx = (int)(_x_size * _inv_resolution);
-    _max_y_idx = (int)(_y_size * _inv_resolution);
-    _max_z_idx = (int)(_z_size * _inv_resolution);
-    _max_grid_idx = _max_x_idx * _max_y_idx * _max_z_idx;
-
-    ros::Rate rate(100);
-    bool status = ros::ok();
-    while(status)
-    {
-        ros::spinOnce();           
-        status = ros::ok();
-        rate.sleep();
-    }
-
-    return 0;
-}
 
 visualization_msgs::MarkerArray path_vis;
 void visPath(vector<Vector3d> path)
@@ -494,4 +463,23 @@ void visPath(vector<Vector3d> path)
     }
 
     _fm_path_vis_pub.publish(path_vis);
+}
+
+double velMapping(double d)
+{
+    double vel;
+
+    if( d <= 0.7)
+    {
+        vel = 0.3;
+    }
+    else if( d <= 1.4)
+    {
+        vel = 1 * d - 0.4;
+    }
+    else
+    {
+        vel = 1.0;
+    }
+    return vel;
 }
