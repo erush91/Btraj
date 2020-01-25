@@ -59,6 +59,7 @@ Vector3d _map_origin;
 double _x_size, _y_size, _z_size;
 int _max_x_idx, _max_y_idx, _max_z_idx;
 unsigned long int _max_grid_idx;
+int x_size, y_size, z_size;
 
 // ROS
 ros::Subscriber _map_sub, _pts_sub, _odom_sub;
@@ -107,6 +108,10 @@ int main(int argc, char** argv)
     _max_z_idx = (int)(_z_size * _inv_resolution);
     _max_grid_idx = _max_x_idx * _max_y_idx * _max_z_idx;
 
+    x_size = (int)(_max_x_idx);
+    y_size = (int)(_max_y_idx);
+    z_size = (int)(_max_z_idx);
+
     ros::Rate rate(100);
     bool status = ros::ok();
     while(status)
@@ -138,6 +143,18 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
 
 }
 
+vector<long int> fcn2(Vector3d pt);
+
+vector<long int> fcn2(Vector3d pt)
+{
+
+    long int  x_idx = ((pt(0) - _start_pt(0) - _map_origin(0)) * _inv_resolution);
+    long int  y_idx = ((pt(1) - _start_pt(1) - _map_origin(1)) * _inv_resolution);
+    long int  z_idx = ((pt(2) - _start_pt(2) - _map_origin(2)) * _inv_resolution);
+    long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
+    vector<long int> idx = {x_idx, y_idx, z_idx, grid_idx};
+    return idx;
+}
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 {
 
@@ -148,9 +165,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     std::string frame;
     
-    int x_size = (int)(_max_x_idx);
-    int y_size = (int)(_max_y_idx);
-    int z_size = (int)(_max_z_idx);
     
 
     ////////////////////
@@ -164,6 +178,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     vector<unsigned int> obs;
 
+
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
         grid_fmm_3d[grid_idx].setOccupancy(0.0);
@@ -174,19 +189,16 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     for (unsigned long int pcl_idx = 0; pcl_idx < cloud.points.size(); pcl_idx++)
     {
         cntt2++;
-        pcl::PointXYZI fmm_vel_pt = cloud.points[pcl_idx];
-        int  x_idx = ((fmm_vel_pt.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
-        int  y_idx = ((fmm_vel_pt.y - _start_pt(1) - _map_origin(1)) * _inv_resolution);
-        int  z_idx = ((fmm_vel_pt.z - _start_pt(2) - _map_origin(2)) * _inv_resolution);
-        unsigned long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
+        Vector3d fmm_vel_pt = {cloud.points[pcl_idx].x, cloud.points[pcl_idx].y, cloud.points[pcl_idx].z};
+        vector<long int> fmm_vel_idx = fcn2(fmm_vel_pt);
 
-        if(x_idx >= 0 && x_idx < _max_x_idx)
+        if(fmm_vel_idx[0] >= 0 && fmm_vel_idx[0] < _max_x_idx)
         {
-            if(y_idx >= 0 && y_idx < _max_y_idx)
+            if(fmm_vel_idx[1] >= 0 && fmm_vel_idx[1] < _max_y_idx)
             {
-                if(z_idx >= 0 && z_idx < _max_z_idx)
+                if(fmm_vel_idx[2] >= 0 && fmm_vel_idx[2] < _max_z_idx)
                 {
-                    grid_fmm_3d[grid_idx].setOccupancy(velMapping(fmm_vel_pt.intensity));
+                    grid_fmm_3d[fmm_vel_idx[3]].setOccupancy(velMapping(cloud.points[pcl_idx].intensity));
                 }
             }
         }
@@ -401,9 +413,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             Vector3d _check_pt = path_pt / num_interpolated_pts_to_check * interp_idx ;
             std::cout << "_check_pt: " << _check_pt(0) << ", " << _check_pt(1) << ", " << _check_pt(2) << std::endl;
 
-            int  x_idx = ((path_coord[path_idx] - _start_pt(0) - _map_origin(0)) * _inv_resolution);
-            int  y_idx = ((path_coord[path_idx] - _start_pt(1) - _map_origin(1)) * _inv_resolution);
-            int  z_idx = ((path_coord[path_idx] - _start_pt(2) - _map_origin(2)) * _inv_resolution);
+            int  x_idx = ((path_coord[path_idx](0) - _start_pt(0) + _start_pt_rounding_eror(0) - _map_origin(0)) * _inv_resolution);
+            int  y_idx = ((path_coord[path_idx](1) - _start_pt(1) + _start_pt_rounding_eror(1)- _map_origin(1)) * _inv_resolution);
+            int  z_idx = ((path_coord[path_idx](2) - _start_pt(2) + _start_pt_rounding_eror(2)- _map_origin(2)) * _inv_resolution);
             unsigned long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
             float d = grid_fmm_3d[grid_idx].getOccupancy();
             if(d > 0)
@@ -435,9 +447,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 line_of_sight_vector_msg.color.b = 0.0;
                 std::cout << "got to here 3" <<  std::endl;
                 geometry_msgs::Point q;
-                q.x = _start_pt(0);
-                q.y = _start_pt(1);
-                q.z = _start_pt(2);             
+                q.x = _start_pt(0) - _start_pt_rounding_eror(0);
+                q.y = _start_pt(1) - _start_pt_rounding_eror(1);
+                q.z = _start_pt(2) - _start_pt_rounding_eror(2);             
                 line_of_sight_vector_msg.points.push_back(q);
                 std::cout << "got to here 4" <<  std::endl;
                 geometry_msgs::Point p;
