@@ -38,6 +38,8 @@ namespace backward
     backward::SignalHandling sh;
 }
 
+
+
 // Typedefs
 typedef nDGridMap<FMCell, 3> FMGrid3D;
 typedef array<unsigned int, 3> Coord3D;
@@ -67,6 +69,26 @@ ros::Publisher _fm_path_vis_pub, _esdf_map_vis_pub, _fmm_map_vis_pub;
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map);
 void rcvOdometryCallbck(const nav_msgs::Odometry odom);
 void visPath(vector<Vector3d> path);
+double velMapping(double d);
+
+double velMapping(double d)
+{
+    double vel;
+
+    if( d <= 0.7)
+    {
+        vel = 0.3;
+    }
+    else if( d <= 1.4)
+    {
+        vel = 1 * d - 0.4;
+    }
+    else
+    {
+        vel = 1.0;
+    }
+    return vel;
+}
 
 void rcvOdometryCallbck(const nav_msgs::Odometry odom)
 {
@@ -122,10 +144,10 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     for (unsigned long int pcl_idx = 0; pcl_idx < cloud.points.size(); pcl_idx++)
     {
         cntt2++;
-        pcl::PointXYZI mk = cloud.points[pcl_idx];
-        int  x_idx = ((mk.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
-        int  y_idx = ((mk.y - _start_pt(1) - _map_origin(1)) * _inv_resolution);
-        int  z_idx = ((mk.z - _start_pt(2) - _map_origin(2)) * _inv_resolution);
+        pcl::PointXYZI esdf_pt = cloud.points[pcl_idx];
+        int  x_idx = ((esdf_pt.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
+        int  y_idx = ((esdf_pt.y - _start_pt(1) - _map_origin(1)) * _inv_resolution);
+        int  z_idx = ((esdf_pt.z - _start_pt(2) - _map_origin(2)) * _inv_resolution);
         unsigned long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
 
         if(x_idx >= 0 && x_idx < _max_x_idx)
@@ -134,7 +156,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             {
                 if(z_idx >= 0 && z_idx < _max_z_idx)
                 {
-                    grid_fmm_3d[grid_idx].setOccupancy(mk.intensity / 5.0);
+                    grid_fmm_3d[grid_idx].setOccupancy(velMapping(esdf_pt.intensity));
                 }
             }
         }
@@ -221,10 +243,10 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // LOCAL FMM PCL //
     ///////////////////
 
-    pcl::PointCloud<pcl::PointXYZI> cloud_fmm;
-    cloud_fmm.height = 1;
-    cloud_fmm.is_dense = true;
-    cloud_fmm.header.frame_id = "odom";
+    pcl::PointCloud<pcl::PointXYZI> cloud_fmm_vel;
+    cloud_fmm_vel.height = 1;
+    cloud_fmm_vel.is_dense = true;
+    cloud_fmm_vel.header.frame_id = "odom";
 
     cnt = 0;
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
@@ -232,26 +254,26 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         int z_idx =  grid_idx / (x_size * y_size);
         int y_idx = (grid_idx - z_idx * x_size * y_size) / x_size;
         int x_idx =  grid_idx - z_idx * x_size * y_size - y_idx * x_size;
-        pcl::PointXYZI fmm_pt;
-        fmm_pt.x = (x_idx + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
-        fmm_pt.y = (y_idx + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
-        fmm_pt.z = (z_idx + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(2) + _map_origin(2);
-        fmm_pt.intensity = grid_fmm_3d[grid_idx].getArrivalTime(); // ARRIVAL TIME ()
-        if(fmm_pt.intensity > 0 && fmm_pt.intensity < 99999)
+        pcl::PointXYZI fmm_vel_pt;
+        fmm_vel_pt.x = (x_idx + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
+        fmm_vel_pt.y = (y_idx + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
+        fmm_vel_pt.z = (z_idx + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(2) + _map_origin(2);
+        fmm_vel_pt.intensity = grid_fmm_3d[grid_idx].getArrivalTime(); // ARRIVAL TIME ()
+        if(fmm_vel_pt.intensity > 0 && fmm_vel_pt.intensity < 99999)
         {
             cnt++;
-            cloud_fmm.push_back(fmm_pt);
+            cloud_fmm_vel.push_back(fmm_vel_pt);
         }
     }
 
-    cloud_fmm.width = cnt;
+    cloud_fmm_vel.width = cnt;
 
     // DEBUGGING
-    // std::cout << "cloud_fmm cnt: " << cnt << std::endl;
-    // std::cout << "cloud_fmm.points.size: " << cloud_fmm.points.size() << std::endl;
+    // std::cout << "cloud_fmm_vel cnt: " << cnt << std::endl;
+    // std::cout << "cloud_fmm_vel.points.size: " << cloud_fmm_vel.points.size() << std::endl;
 
     sensor_msgs::PointCloud2 fmmMap;
-    pcl::toROSMsg(cloud_fmm, fmmMap);
+    pcl::toROSMsg(cloud_fmm_vel, fmmMap);
     _fmm_map_vis_pub.publish(fmmMap);
 
 
@@ -388,15 +410,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // float occ_test = grid_fmm_3d[testPtIdx].getOccupancy();
     // std::cout << "occ_test:" << occ_test << std::endl;
 
-
-
-
-
-
-
-
-
-
 }
 
 int main(int argc, char** argv)
@@ -407,8 +420,8 @@ int main(int argc, char** argv)
     _map_sub  = nh.subscribe( "map",       1, rcvPointCloudCallBack );
     _odom_sub = nh.subscribe( "odometry",  1, rcvOdometryCallbck);
 
-    _esdf_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("map/esdf", 1);
-    _fmm_map_vis_pub    = nh.advertise<sensor_msgs::PointCloud2>("map/fmm_arrival_time", 1);
+    _esdf_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("map/fmm/velocity", 1);
+    _fmm_map_vis_pub    = nh.advertise<sensor_msgs::PointCloud2>("map/fmm/arrival_time", 1);
     _fm_path_vis_pub    = nh.advertise<visualization_msgs::MarkerArray>("goal/path/viz", 1);
 
     nh.param("map/resolution",  _resolution, 0.2);
