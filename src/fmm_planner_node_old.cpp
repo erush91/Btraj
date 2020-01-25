@@ -38,6 +38,8 @@ namespace backward
     backward::SignalHandling sh;
 }
 
+
+
 // Typedefs
 typedef nDGridMap<FMCell, 3> FMGrid3D;
 typedef array<unsigned int, 3> Coord3D;
@@ -62,14 +64,11 @@ unsigned long int _max_grid_idx;
 
 // ROS
 ros::Subscriber _map_sub, _pts_sub, _odom_sub;
-ros::Publisher _fm_path_vis_pub;
-ros::Publisher _esdf_map_vis_pub;
-ros::Publisher _fmm_map_vis_pub;
-ros::Publisher _line_of_sight_path_vis_pub;
+ros::Publisher _fm_path_vis_pub, _esdf_map_vis_pub, _fmm_map_vis_pub;
 
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map);
 void rcvOdometryCallbck(const nav_msgs::Odometry odom);
-void publishVisPath(vector<Vector3d> path, ros::Publisher _path_vis_pub);
+void visPath(vector<Vector3d> path);
 double velMapping(double d);
 
 int main(int argc, char** argv)
@@ -82,8 +81,7 @@ int main(int argc, char** argv)
 
     _esdf_map_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("map/fmm/velocity", 1);
     _fmm_map_vis_pub    = nh.advertise<sensor_msgs::PointCloud2>("map/fmm/arrival_time", 1);
-    _fm_path_vis_pub    = nh.advertise<visualization_msgs::MarkerArray>("goal/fmm_path/viz", 1);
-    _line_of_sight_path_vis_pub    = nh.advertise<visualization_msgs::MarkerArray>("goal/line_of_sight_path/viz", 1);
+    _fm_path_vis_pub    = nh.advertise<visualization_msgs::MarkerArray>("goal/path/viz", 1);
 
     nh.param("map/resolution",  _resolution, 0.2);
     nh.param("map/x_size",      _x_size, 50.0);
@@ -157,6 +155,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     grid_fmm_3d.clear();
 
     vector<unsigned int> obs;
+
 
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
@@ -307,7 +306,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     /////////////////////////////
 
     Vector3d goal_offset = {3, 0, 0};
-    Vector3d startIdx3d = (goal_offset - _map_origin) * _inv_resolution;
+    Vector3d offset = {3, 0, 0};
+    Vector3d startIdx3d = (goal_offset - _map_origin) * _inv_resolution - offset;
     Coord3D goal_point = {(unsigned int)round(startIdx3d[0]), (unsigned int)round(startIdx3d[1]), (unsigned int)round(startIdx3d[2])};
     unsigned int goalIdx;
     grid_fmm_3d.coord2idx(goal_point, goalIdx);
@@ -337,6 +337,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         }
         std::cout << std::endl;
 
+        // path_coord.push_back(_start_pt);
+
         double coord_x, coord_y, coord_z;
   
         for(int path_idx = (int)path3D.size() - 1; path_idx >= 0; path_idx--)
@@ -350,7 +352,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             path_coord.push_back(pt);
             std::cout << "path[" << path_idx << "]: " << pt(0) - _start_pt(0) << ", " << pt(1) - _start_pt(1) << ", " << pt(2) - _start_pt(2) << std::endl;
         }
-        publishVisPath(path_coord, _fm_path_vis_pub);
+        visPath(path_coord);
 
 
     }
@@ -365,9 +367,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     /////////////////////////
     // GOAL POINT SELCTION //
     /////////////////////////
-
-
-    vector<Vector3d> path_line_of_sight;
 
     for(int path_idx = 0; path_idx < int(path_coord.size()); path_idx++)
     {
@@ -392,6 +391,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             Vector3d _check_pt = path_pt / num_interpolated_pts_to_check * interp_idx ;
             std::cout << "_check_pt: " << _check_pt(0) << ", " << _check_pt(1) << ", " << _check_pt(2) << std::endl;
         }
+            
+
+
 
 
 
@@ -412,84 +414,72 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         std::cout << "occ[" << path_idx << "]:" << occ << std::endl;
         std::cout << std::endl;
 
-        if(path_idx == int(path_coord.size()) - 1)
-        {
-            for(int interp_idx = 1; interp_idx < num_interpolated_pts_to_check + 1; interp_idx++)
-            {
-                std::cout << "hello" << num_interpolated_pts_to_check << std::endl;
-                Vector3d line_of_sight_pt = path_pt / num_interpolated_pts_to_check * interp_idx + _start_pt;
-                path_line_of_sight.push_back(line_of_sight_pt);
-            }            
-        publishVisPath(path_line_of_sight, _line_of_sight_path_vis_pub);
-        }
     }
+
     std::cout << std::endl;
     std::cout << std::endl;
     
 }
 
-void publishVisPath(vector<Vector3d> path, ros::Publisher _path_vis_pub)
+
+visualization_msgs::MarkerArray path_vis;
+void visPath(vector<Vector3d> path)
 {
+    for(auto & mk: path_vis.markers)
+        mk.action = visualization_msgs::Marker::DELETE;
 
-    visualization_msgs::MarkerArray marker_array_msg;
-    visualization_msgs::Marker marker_msg;
-    for(auto & marker_msg: marker_array_msg.markers)
-    {
-        marker_msg.action = visualization_msgs::Marker::DELETE;
-    }
-    
-    _path_vis_pub.publish(marker_array_msg);
+    _fm_path_vis_pub.publish(path_vis);
+    path_vis.markers.clear();
 
-    marker_array_msg.markers.clear();
+    visualization_msgs::Marker mk;
+    mk.header.frame_id = "odom";
+    mk.header.stamp = ros::Time::now();
+    mk.ns = "b_traj/fast_marching_path";
+    mk.type = visualization_msgs::Marker::CUBE;
+    mk.action = visualization_msgs::Marker::ADD;
 
-    marker_msg.header.frame_id = "odom";
-    marker_msg.header.stamp = ros::Time::now();
-    marker_msg.ns = "b_traj/fast_marching_path";
-    marker_msg.type = visualization_msgs::Marker::CUBE;
-    marker_msg.action = visualization_msgs::Marker::ADD;
-
-    marker_msg.pose.orientation.x = 0.0;
-    marker_msg.pose.orientation.y = 0.0;
-    marker_msg.pose.orientation.z = 0.0;
-    marker_msg.pose.orientation.w = 1.0;
-    marker_msg.color.a = 0.6;
-    marker_msg.color.r = 1.0;
-    marker_msg.color.g = 0.647;
-    marker_msg.color.b = 0.0;
+    mk.pose.orientation.x = 0.0;
+    mk.pose.orientation.y = 0.0;
+    mk.pose.orientation.z = 0.0;
+    mk.pose.orientation.w = 1.0;
+    mk.color.a = 0.6;
+    mk.color.r = 1.0;
+    mk.color.g = 0.647;
+    mk.color.b = 0.0;
 
     for(int path_idx = 0; path_idx < int(path.size()); path_idx++)
     {
-        marker_msg.id = path_idx;
+        mk.id = path_idx;
 
-        marker_msg.pose.position.x = path[path_idx](0);
-        marker_msg.pose.position.y = path[path_idx](1);
-        marker_msg.pose.position.z = path[path_idx](2);
+        mk.pose.position.x = path[path_idx](0);
+        mk.pose.position.y = path[path_idx](1);
+        mk.pose.position.z = path[path_idx](2);
 
-        marker_msg.scale.x = _resolution;
-        marker_msg.scale.y = _resolution;
-        marker_msg.scale.z = _resolution;
+        mk.scale.x = _resolution;
+        mk.scale.y = _resolution;
+        mk.scale.z = _resolution;
 
-        marker_array_msg.markers.push_back(marker_msg);
+        path_vis.markers.push_back(mk);
     }
 
-    _path_vis_pub.publish(marker_array_msg);
+    _fm_path_vis_pub.publish(path_vis);
 }
 
 double velMapping(double d)
 {
     double vel;
+
     if( d <= 0.7)
     {
-        vel = 0.2;
+        vel = 0.3;
     }
     else if( d <= 1.4)
     {
-        vel = 0.50632911392 * (d - 0.7) * (d - 0.7) + 0.2;
-        // 0.6 = a * (1.4 - 0.7) * (1.4 - 0.7)  * (1.4 - 0.7) + 0.2
+        vel = 1 * d - 0.4;
     }
     else
     {
-        vel = 0.6;
+        vel = 1.0;
     }
     return vel;
 }
