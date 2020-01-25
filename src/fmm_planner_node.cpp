@@ -77,6 +77,15 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom);
 void publishVisPath(vector<Vector3d> path, ros::Publisher _path_vis_pub);
 double velMapping(double d);
 
+
+vector<long int> ptPcl2idx(pcl::PointXYZI pt);
+vector<long int> ptVect2idx(vector<float> pt);
+long int ptVect2gridIdx(vector<float> pt);
+pcl::PointXYZI idx2pt(long int grid_idx);
+vector<int> grid2xyz(long int grid_idx);
+pcl::PointXYZI xyz2ptPCl(vector<int> xyz_idx);
+Vector3d xyz2ptVect(vector<int> xyz_idx);
+
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "b_traj_node");
@@ -143,30 +152,80 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
 
 }
 
-vector<long int> fcn2(Vector3d pt);
 
-vector<long int> fcn2(Vector3d pt)
+vector<long int> ptPcl2idx(pcl::PointXYZI pt)
 {
-
-    long int  x_idx = ((pt(0) - _start_pt(0) - _map_origin(0)) * _inv_resolution);
-    long int  y_idx = ((pt(1) - _start_pt(1) - _map_origin(1)) * _inv_resolution);
-    long int  z_idx = ((pt(2) - _start_pt(2) - _map_origin(2)) * _inv_resolution);
+    long int  x_idx = ((pt.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
+    long int  y_idx = ((pt.y - _start_pt(1) - _map_origin(1)) * _inv_resolution);
+    long int  z_idx = ((pt.z - _start_pt(2) - _map_origin(2)) * _inv_resolution);
     long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
     vector<long int> idx = {x_idx, y_idx, z_idx, grid_idx};
     return idx;
 }
+
+vector<long int> ptVect2idx(vector<float> pt)
+{
+    long int  x_idx = ((pt[0] - _start_pt(0) - _map_origin(0)) * _inv_resolution);
+    long int  y_idx = ((pt[1] - _start_pt(1) - _map_origin(1)) * _inv_resolution);
+    long int  z_idx = ((pt[2] - _start_pt(2) - _map_origin(2)) * _inv_resolution);
+    long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
+    vector<long int> idx = {x_idx, y_idx, z_idx, grid_idx};
+    return idx;
+}
+
+long int ptVect2gridIdx(vector<float> pt)
+{
+    long int  x_idx = ((pt[0] - _start_pt(0) - _map_origin(0)) * _inv_resolution);
+    long int  y_idx = ((pt[1] - _start_pt(1) - _map_origin(1)) * _inv_resolution);
+    long int  z_idx = ((pt[2] - _start_pt(2) - _map_origin(2)) * _inv_resolution);
+    long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
+    return grid_idx;
+}
+
+pcl::PointXYZI idx2pt(long int grid_idx)
+{
+    vector<int> xyz_idx = grid2xyz(grid_idx);
+    pcl::PointXYZI pt = xyz2ptPCl(xyz_idx);
+    return pt;
+}
+
+vector<int> grid2xyz(long int grid_idx)
+{
+    int z_idx =  grid_idx / (x_size * y_size);
+    int y_idx = (grid_idx - z_idx * x_size * y_size) / x_size;
+    int x_idx =  grid_idx - z_idx * x_size * y_size - y_idx * x_size;
+    vector<int> xyz_int = {x_idx, y_idx, z_idx};
+    return xyz_int;
+}
+
+
+pcl::PointXYZI xyz2ptPCl(vector<int> xyz_idx)
+{
+    pcl::PointXYZI pt;
+    pt.x = (xyz_idx[0] + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
+    pt.y = (xyz_idx[1] + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
+    pt.z = (xyz_idx[2] + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(2) + _map_origin(2);
+    return pt;
+}
+
+Vector3d xyz2ptVect(vector<int> xyz_idx)
+{
+    Vector3d pt;
+    pt(0) = (xyz_idx[0] + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
+    pt(1) = (xyz_idx[1] + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
+    pt(2) = (xyz_idx[2] + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(2) + _map_origin(2);
+    return pt;
+}
+
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 {
 
     pcl::PointCloud<pcl::PointXYZI> cloud;  
     pcl::fromROSMsg(pointcloud_map, cloud);
 
-    std::cout << "_start_pt: " << _start_pt(0) << ", " << _start_pt(1) << ", " << _start_pt(2) << std::endl;
-
-    std::string frame;
+    // DEBUGGING
+    // std::cout << "_start_pt: " << _start_pt(0) << ", " << _start_pt(1) << ", " << _start_pt(2) << std::endl;
     
-    
-
     ////////////////////
     // LOCAL ESDF MAP //
     ////////////////////
@@ -178,19 +237,16 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     vector<unsigned int> obs;
 
-
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
         grid_fmm_3d[grid_idx].setOccupancy(0.0);
     }
 
-    long int cntt2 = 0;
     // Assign the ESDF
     for (unsigned long int pcl_idx = 0; pcl_idx < cloud.points.size(); pcl_idx++)
     {
-        cntt2++;
-        Vector3d fmm_vel_pt = {cloud.points[pcl_idx].x, cloud.points[pcl_idx].y, cloud.points[pcl_idx].z};
-        vector<long int> fmm_vel_idx = fcn2(fmm_vel_pt);
+        pcl::PointXYZI fmm_vel_pt = cloud.points[pcl_idx];
+        vector<long int> fmm_vel_idx = ptPcl2idx(fmm_vel_pt);
 
         if(fmm_vel_idx[0] >= 0 && fmm_vel_idx[0] < _max_x_idx)
         {
@@ -203,7 +259,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             }
         }
     }
-    std::cout << cntt2 << std::endl;
 
     long int cntt = 0;
     for(unsigned long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
@@ -255,13 +310,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     long int cnt = 0;
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
-        int z_idx =  grid_idx / (x_size * y_size);
-        int y_idx = (grid_idx - z_idx * x_size * y_size) / x_size;
-        int x_idx =  grid_idx - z_idx * x_size * y_size - y_idx * x_size;
-        pcl::PointXYZI fmm_vel_pt;
-        fmm_vel_pt.x = (x_idx + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
-        fmm_vel_pt.y = (y_idx + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
-        fmm_vel_pt.z = (z_idx + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(2) + _map_origin(2);
+        pcl::PointXYZI fmm_vel_pt = idx2pt(grid_idx);
         fmm_vel_pt.intensity = grid_fmm_3d[grid_idx].getOccupancy();
         if(fmm_vel_pt.intensity > 0)
         {
@@ -280,7 +329,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     pcl::toROSMsg(cloud_fmm_vel, esdfMap);
     _map_fmm_vel_vis_pub.publish(esdfMap);
 
-
     ///////////////////
     // LOCAL FMM PCL //
     ///////////////////
@@ -293,13 +341,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cnt = 0;
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
-        int z_idx =  grid_idx / (x_size * y_size);
-        int y_idx = (grid_idx - z_idx * x_size * y_size) / x_size;
-        int x_idx =  grid_idx - z_idx * x_size * y_size - y_idx * x_size;
-        pcl::PointXYZI fmm_time_pt;
-        fmm_time_pt.x = (x_idx + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
-        fmm_time_pt.y = (y_idx + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
-        fmm_time_pt.z = (z_idx + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(2) + _map_origin(2);
+        pcl::PointXYZI fmm_time_pt = idx2pt(grid_idx);
         fmm_time_pt.intensity = grid_fmm_3d[grid_idx].getArrivalTime(); // ARRIVAL TIME ()
         if(fmm_time_pt.intensity > 0 && fmm_time_pt.intensity < 99999)
         {
@@ -342,51 +384,44 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     }
     else
     {
-        std::cout << "Path3D is :" << std::endl;
-        for (auto pt: path3D)
-        {
-            for (int elem : pt)
-            {
-                std::cout << elem << ' ';
-            }
-            std::cout << std::endl;
-        }
-        std::cout << std::endl;
-
-        double coord_x, coord_y, coord_z;
+        // DEBUGGING
+        // std::cout << "Path3D is :" << std::endl;
+        // for (auto pt: path3D)
+        // {
+        //     for (int elem : pt)
+        //     {
+        //         std::cout << elem << ' ';
+        //     }
+        //     std::cout << std::endl;
+        // }
+        // std::cout << std::endl;
   
         for(int path_idx = (int)path3D.size() - 1; path_idx >= 0; path_idx--)
         {
             cnt2++;
-            coord_x = path3D[path_idx][0] * _resolution + _start_pt(0) + _map_origin(0);
-            coord_y = path3D[path_idx][1] * _resolution + _start_pt(1) + _map_origin(1);
-            coord_z = path3D[path_idx][2] * _resolution + _start_pt(2) + _map_origin(2);
-
-            Vector3d pt(coord_x, coord_y, coord_z);
+            vector<int> path3Dxyz = {path3D[path_idx][0], path3D[path_idx][1], path3D[path_idx][2]};
+            Vector3d pt = xyz2ptVect(path3Dxyz);
             path_coord.push_back(pt);
-            std::cout << "path[" << path_idx << "]: " << pt(0) - _start_pt(0) << ", " << pt(1) - _start_pt(1) << ", " << pt(2) - _start_pt(2) << std::endl;
+
+            // DEBUGGING
+            // std::cout << "path[" << path_idx << "]: " << pt(0) - _start_pt(0) << ", " << pt(1) - _start_pt(1) << ", " << pt(2) - _start_pt(2) << std::endl;
         }
         publishVisPath(path_coord, _fm_path_vis_pub);
-
-
     }
 
-
-    GridWriter::saveGridValues("test_fm3d.txt", grid_fmm_3d);
+    // DEBUGGING
+    // GridWriter::saveGridValues("test_fm3d.txt", grid_fmm_3d);
     
-    std::cout << "path3D.size(): " << path3D.size() << std::endl;
-    std::cout << "cnt2: " << cnt2 << std::endl;
-
+    //DEBUGGING
+    // std::cout << "path3D.size(): " << path3D.size() << std::endl;
+    // std::cout << "cnt2: " << cnt2 << std::endl;
 
     /////////////////////////
     // GOAL POINT SELCTION //
     /////////////////////////
 
-
     vector<Vector3d> path_line_of_sight;
     int vec_idx = 0;
-
-    // visualization_msgs::MarkerArray line_of_sight_vectors_msg;
 
     visualization_msgs::MarkerArray line_of_sight_vectors_msg;
 
@@ -413,21 +448,16 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             Vector3d _check_pt = path_pt / num_interpolated_pts_to_check * interp_idx ;
             std::cout << "_check_pt: " << _check_pt(0) << ", " << _check_pt(1) << ", " << _check_pt(2) << std::endl;
 
-            int  x_idx = ((path_coord[path_idx](0) - _start_pt(0) + _start_pt_rounding_eror(0) - _map_origin(0)) * _inv_resolution);
-            int  y_idx = ((path_coord[path_idx](1) - _start_pt(1) + _start_pt_rounding_eror(1)- _map_origin(1)) * _inv_resolution);
-            int  z_idx = ((path_coord[path_idx](2) - _start_pt(2) + _start_pt_rounding_eror(2)- _map_origin(2)) * _inv_resolution);
-            unsigned long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
-            float d = grid_fmm_3d[grid_idx].getOccupancy();
+
+            vector<float> path_coord_xyz = {path_coord[path_idx](0), path_coord[path_idx](1), path_coord[path_idx](2)};
+            vector<long int> check_idx = ptVect2idx(path_coord_xyz);
+            float d = grid_fmm_3d[check_idx[3]].getOccupancy();
             if(d > 0)
             {
-
-                visualization_msgs::Marker line_of_sight_vector_msg;
-                std::cout << "got to here 1" << vec_idx <<  std::endl;
-                line_of_sight_vector_msg.header.frame_id = "odom";
-                std::cout << "got to here 1.5" <<  std::endl;                
+                visualization_msgs::Marker line_of_sight_vector_msg;      
                 line_of_sight_vector_msg.header.stamp = ros::Time();
+                line_of_sight_vector_msg.header.frame_id = "odom";
                 // line_of_sight_vector_msg.ns = "my_namespace";
-                std::cout << "got to here 2" <<  std::endl;
                 line_of_sight_vector_msg.id = vec_idx;
                 line_of_sight_vector_msg.type = visualization_msgs::Marker::ARROW;
                 line_of_sight_vector_msg.action = visualization_msgs::Marker::ADD;
@@ -445,20 +475,23 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 line_of_sight_vector_msg.color.r = 0.0;
                 line_of_sight_vector_msg.color.g = 1.0;
                 line_of_sight_vector_msg.color.b = 0.0;
-                std::cout << "got to here 3" <<  std::endl;
                 geometry_msgs::Point q;
                 q.x = _start_pt(0) - _start_pt_rounding_eror(0);
                 q.y = _start_pt(1) - _start_pt_rounding_eror(1);
                 q.z = _start_pt(2) - _start_pt_rounding_eror(2);             
                 line_of_sight_vector_msg.points.push_back(q);
-                std::cout << "got to here 4" <<  std::endl;
                 geometry_msgs::Point p;
-                p.x = (x_idx + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
-                p.y = (y_idx + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
-                p.z = (z_idx + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(2) + _map_origin(2);
-                line_of_sight_vector_msg.points.push_back(p);
-                std::cout << "got to here 5" <<  std::endl;
 
+
+                vector<int> check_xyz_idx = {check_idx[0], check_idx[1], check_idx[2]};
+                Vector3d check_pt = xyz2ptVect(check_xyz_idx);
+                p.x = check_pt(0);
+                p.y = check_pt(1);
+                p.z = check_pt(2);
+                // p.x = (check_idx[0] + 0.5) * _resolution + _start_pt(0) - _start_pt_rounding_eror(0) + _map_origin(0);
+                // p.y = (check_idx[1] + 0.5) * _resolution + _start_pt(1) - _start_pt_rounding_eror(1) + _map_origin(1);
+                // p.z = (check_idx[2] + 0.5) * _resolution + _start_pt(2) - _start_pt_rounding_eror(2) + _map_origin(2);
+                line_of_sight_vector_msg.points.push_back(p);
                 line_of_sight_vectors_msg.markers.push_back(line_of_sight_vector_msg);
 
                 vec_idx++;
@@ -468,11 +501,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 std::cout << "ERRRRRRROOOOOOORRRRRR:" << d << std::endl;
             }
 
-        std::cout << "got to here 6" <<  std::endl; 
         _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
-        std::cout << "got to here 7" <<  std::endl;
 
-            
         }
            
         Vector3d goal_pt = path_coord[path_idx] - _start_pt - _map_origin;
