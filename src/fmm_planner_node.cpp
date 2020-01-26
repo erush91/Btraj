@@ -59,6 +59,7 @@ bool _has_traj  = false;
 Vector3d _start_pt, _start_pt_rounding_eror;
 Vector3d _map_origin;
 double _x_size, _y_size, _z_size;
+double _look_ahead_distance;
 int _max_x_idx, _max_y_idx, _max_z_idx;
 unsigned long int _max_grid_idx;
 int x_size, y_size, z_size;
@@ -71,6 +72,8 @@ ros::Publisher _map_fmm_timel_vis_pub;
 ros::Publisher _line_of_sight_path_vis_pub;
 ros::Publisher _line_of_sight_vector_vis_pub;
 ros::Publisher _collision_vector_vis_pub;
+ros::Publisher _goal_point_uncropped_pub;
+ros::Publisher _goal_pose_uncropped_pub;
 ros::Publisher _goal_point_pub;
 ros::Publisher _goal_pose_pub;
 
@@ -97,19 +100,22 @@ int main(int argc, char** argv)
     _map_sub  = nh.subscribe( "map",       1, rcvPointCloudCallBack );
     _odom_sub = nh.subscribe( "odometry",  1, rcvOdometryCallbck);
 
-    _map_fmm_vel_vis_pub            = nh.advertise<sensor_msgs::PointCloud2>("map/fmm/velocity", 1);
-    _map_fmm_timel_vis_pub          = nh.advertise<sensor_msgs::PointCloud2>("map/fmm/arrival_time", 1);
-    _fm_path_vis_pub                = nh.advertise<visualization_msgs::MarkerArray>("goal/fmm_path/viz", 1);
-    _line_of_sight_path_vis_pub     = nh.advertise<visualization_msgs::MarkerArray>("goal/line_of_sight_path/viz", 1);
-    _line_of_sight_vector_vis_pub   = nh.advertise<visualization_msgs::MarkerArray>("goal/line_of_sight/vectors/viz", 1);
-    _collision_vector_vis_pub       = nh.advertise<visualization_msgs::MarkerArray>("goal/collision/vectors/viz", 1);
-    _goal_pose_pub                  = nh.advertise<geometry_msgs::PoseStamped>("goal/pose", 1);
-    _goal_point_pub                 = nh.advertise<geometry_msgs::PointStamped>("goal/point", 1);
+    _map_fmm_vel_vis_pub            = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/velocity", 1);
+    _map_fmm_timel_vis_pub          = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/arrival_time", 1);
+    _fm_path_vis_pub                = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/fmm_path", 1);
+    _line_of_sight_path_vis_pub     = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/line_of_sight_path", 1);
+    _line_of_sight_vector_vis_pub   = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/line_of_sight/vectors", 1);
+    _collision_vector_vis_pub       = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/collision/vectors", 1);
+    _goal_pose_uncropped_pub        = nh.advertise<geometry_msgs::PoseStamped>("viz/goal/pose_uncropped", 1);
+    _goal_point_uncropped_pub       = nh.advertise<geometry_msgs::PointStamped>("viz/goal/point_uncropped", 1);
+    _goal_pose_pub                  = nh.advertise<geometry_msgs::PoseStamped>("out/goal/pose", 1);
+    _goal_point_pub                 = nh.advertise<geometry_msgs::PointStamped>("out/goal/point", 1);
 
-    nh.param("map/resolution",  _resolution, 0.2);
-    nh.param("map/x_size",      _x_size, 50.0);
-    nh.param("map/y_size",      _y_size, 50.0);
-    nh.param("map/z_size",      _z_size, 50.0);
+    nh.param("map/resolution",              _resolution, 0.2);
+    nh.param("map/x_size",                  _x_size, 50.0);
+    nh.param("map/y_size",                  _y_size, 50.0);
+    nh.param("map/z_size",                  _z_size, 50.0);
+    nh.param("goal/look_ahead_distance",   _look_ahead_distance, 2.5);
 
     // Origin is located in the middle of the map
     _map_origin = {- _x_size / 2.0, - _y_size / 2.0 , - _z_size / 2.0};
@@ -435,15 +441,25 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     visualization_msgs::MarkerArray line_of_sight_vectors_msg;
     visualization_msgs::MarkerArray collision_vectors_msg;
 
+    // Find xyz coordinate of robot point 
+    vector<float> robot_pt_xyz = {0.5 * _resolution + _start_pt(0) - _start_pt_rounding_eror(0),
+                                  0.5 * _resolution + _start_pt(1) - _start_pt_rounding_eror(1),
+                                  0.5 * _resolution + _start_pt(2) - _start_pt_rounding_eror(2)};
+                                    
+    // Find xyz indeces of robot point in FMM map
+    vector<long int> robot_pt_idx = ptVect2idx(robot_pt_xyz);
+    vector<int> robot_xyz_idx = {robot_pt_idx[0], robot_pt_idx[1], robot_pt_idx[2]};
+
+    // Find xyz coordinate of robot point (from FMM map)
+    Vector3d robot_pt = xyz2ptVect(robot_xyz_idx);
+    
     for(int path_idx = 0; path_idx < int(path_coord.size()); path_idx++)
     {
+        // Find xyz coordinate of path point[path_idx]
         vector<float> path_pt_xyz = {path_coord[path_idx](0),
                                      path_coord[path_idx](1),
                                      path_coord[path_idx](2)};
-        vector<float> robot_pt_xyz = {0.5 * _resolution + _start_pt(0) - _start_pt_rounding_eror(0),
-                                      0.5 * _resolution + _start_pt(1) - _start_pt_rounding_eror(1),
-                                      0.5 * _resolution + _start_pt(2) - _start_pt_rounding_eror(2)};
-        vector<long int> robot_pt_idx = ptVect2idx(robot_pt_xyz);
+
         float path_pt_distance = sqrt(path_pt_xyz[0]*path_pt_xyz[0] + path_pt_xyz[1]*path_pt_xyz[1] + path_pt_xyz[2]*path_pt_xyz[2]);
         int num_interpolated_pts_to_check = ceil(2 * _inv_resolution * (float)path_pt_distance);
         bool collision_detected = 0;
@@ -487,8 +503,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 line_of_sight_vector_msg.color.g = 1.0;
                 line_of_sight_vector_msg.color.b = 0.0;
                 geometry_msgs::Point q;
-                vector<int> robot_xyz_idx = {robot_pt_idx[0], robot_pt_idx[1], robot_pt_idx[2]};
-                Vector3d robot_pt = xyz2ptVect(robot_xyz_idx);
                 q.x = robot_pt(0);
                 q.y = robot_pt(1);
                 q.z = robot_pt(2);
@@ -534,8 +548,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 collision_vector_msg.color.g = 0.0;
                 collision_vector_msg.color.b = 0.0;
                 geometry_msgs::Point q;
-                vector<int> robot_xyz_idx = {robot_pt_idx[0], robot_pt_idx[1], robot_pt_idx[2]};
-                Vector3d robot_pt = xyz2ptVect(robot_xyz_idx);
                 q.x = robot_pt(0);
                 q.y = robot_pt(1);
                 q.z = robot_pt(2);
@@ -554,26 +566,53 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             }
         }
         
+        geometry_msgs::PointStamped goal_point_uncropped;
+        goal_point_uncropped.header.stamp = ros::Time::now();
+        goal_point_uncropped.header.frame_id = "odom";
+        goal_point_uncropped.point.x = goal_pt(0);
+        goal_point_uncropped.point.y = goal_pt(1);
+        goal_point_uncropped.point.z = goal_pt(2);
+            
+        geometry_msgs::PoseStamped goal_pose_uncropped;
+        goal_pose_uncropped.header.stamp = ros::Time::now();
+        goal_pose_uncropped.header.frame_id = "odom";
+        goal_pose_uncropped.pose.position.x = goal_pt(0);
+        goal_pose_uncropped.pose.position.y = goal_pt(1);
+        goal_pose_uncropped.pose.position.z = goal_pt(2);
+        goal_pose_uncropped.pose.orientation.x = 0.0;
+        goal_pose_uncropped.pose.orientation.y = 0.0;
+        goal_pose_uncropped.pose.orientation.z = 0.0;
+        goal_pose_uncropped.pose.orientation.w = 1.0;
+
+        float goal_point_uncropped_dist = sqrt((goal_pt(0) - robot_pt(0)) * (goal_pt(0) - robot_pt(0))
+                                             + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
+                                             + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
+
         geometry_msgs::PointStamped goal_point;
         goal_point.header.stamp = ros::Time::now();
         goal_point.header.frame_id = "odom";
-        goal_point.point.x = goal_pt(0);
-        goal_point.point.y = goal_pt(1);
-        goal_point.point.z = goal_pt(2);
+        goal_point.point.x = robot_pt(0) + (goal_pt(0) - robot_pt(0)) * _look_ahead_distance / goal_point_uncropped_dist;
+        goal_point.point.y = robot_pt(1) + (goal_pt(1) - robot_pt(1)) * _look_ahead_distance / goal_point_uncropped_dist;
+        goal_point.point.z = robot_pt(2) + (goal_pt(2) - robot_pt(2)) * _look_ahead_distance / goal_point_uncropped_dist;
             
         geometry_msgs::PoseStamped goal_pose;
         goal_pose.header.stamp = ros::Time::now();
         goal_pose.header.frame_id = "odom";
-        goal_pose.pose.position.x = goal_pt(0);
-        goal_pose.pose.position.y = goal_pt(1);
-        goal_pose.pose.position.z = goal_pt(2);
+        goal_pose.pose.position.x = robot_pt(0) + (goal_pt(0) - robot_pt(0)) * _look_ahead_distance / goal_point_uncropped_dist;
+        goal_pose.pose.position.y = robot_pt(1) + (goal_pt(1) - robot_pt(1)) * _look_ahead_distance / goal_point_uncropped_dist;
+        goal_pose.pose.position.z = robot_pt(2) + (goal_pt(2) - robot_pt(2)) * _look_ahead_distance / goal_point_uncropped_dist;
         goal_pose.pose.orientation.x = 0.0;
         goal_pose.pose.orientation.y = 0.0;
         goal_pose.pose.orientation.z = 0.0;
         goal_pose.pose.orientation.w = 1.0;
+
+        std::cout << sqrt(goal_point.point.x*goal_point.point.x + goal_point.point.y*goal_point.point.y + goal_point.point.z*goal_point.point.z) << std::endl;
         
+        _goal_point_uncropped_pub.publish(goal_point_uncropped);
+        _goal_pose_uncropped_pub.publish(goal_pose_uncropped);
         _goal_point_pub.publish(goal_point);
         _goal_pose_pub.publish(goal_pose);
+
         // _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
         // _collision_vector_vis_pub.publish(collision_vectors_msg);
     }
