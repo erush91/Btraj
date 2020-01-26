@@ -503,7 +503,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
         _max_reward_point_pub.publish(max_reward_point);
         _max_reward_pose_pub.publish(max_reward_pose);
-
     }
     else
     {
