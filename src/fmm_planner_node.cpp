@@ -30,6 +30,9 @@
 
 #include <functional> // For multiplying vector by scalar
 
+#define _USE_MATH_DEFINES
+#include <cmath> // For quaternion to Euler angle conversion
+
 #include "backward.hpp"
 
 using namespace std;
@@ -57,6 +60,8 @@ bool _has_target= false;
 bool _has_traj  = false;
 
 Vector3d _start_pt, _start_pt_rounding_eror;
+Vector3d _desired_pt;
+Vector3d max_reward_pt;
 Vector3d _map_origin;
 double _x_size, _y_size, _z_size;
 double _look_ahead_distance;
@@ -68,7 +73,8 @@ int x_size, y_size, z_size;
 ros::Subscriber _map_sub, _pts_sub, _odom_sub;
 ros::Publisher _fm_path_vis_pub;
 ros::Publisher _map_fmm_vel_vis_pub;
-ros::Publisher _map_fmm_timel_vis_pub;
+ros::Publisher _map_fmm_time_vis_pub;
+ros::Publisher _map_fmm_reward_vis_pub;
 ros::Publisher _line_of_sight_path_vis_pub;
 ros::Publisher _line_of_sight_vector_vis_pub;
 ros::Publisher _collision_vector_vis_pub;
@@ -76,6 +82,8 @@ ros::Publisher _goal_point_uncropped_pub;
 ros::Publisher _goal_pose_uncropped_pub;
 ros::Publisher _goal_point_pub;
 ros::Publisher _goal_pose_pub;
+ros::Publisher _max_reward_point_pub;
+ros::Publisher _max_reward_pose_pub;
 
 visualization_msgs::MarkerArray line_of_sight_vectors_msg;
     
@@ -101,7 +109,8 @@ int main(int argc, char** argv)
     _odom_sub = nh.subscribe( "odometry",  1, rcvOdometryCallbck);
 
     _map_fmm_vel_vis_pub            = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/velocity", 1);
-    _map_fmm_timel_vis_pub          = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/arrival_time", 1);
+    _map_fmm_time_vis_pub           = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/arrival_time", 1);
+    _map_fmm_reward_vis_pub         = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/reward", 1);
     _fm_path_vis_pub                = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/fmm_path", 1);
     _line_of_sight_path_vis_pub     = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/line_of_sight_path", 1);
     _line_of_sight_vector_vis_pub   = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/line_of_sight/vectors", 1);
@@ -110,6 +119,8 @@ int main(int argc, char** argv)
     _goal_point_uncropped_pub       = nh.advertise<geometry_msgs::PointStamped>("viz/goal/point_uncropped", 1);
     _goal_pose_pub                  = nh.advertise<geometry_msgs::PoseStamped>("out/goal/pose", 1);
     _goal_point_pub                 = nh.advertise<geometry_msgs::PointStamped>("out/goal/point", 1);
+    _max_reward_pose_pub            = nh.advertise<geometry_msgs::PoseStamped>("out/goal/max_reward_pose", 1);
+    _max_reward_point_pub           = nh.advertise<geometry_msgs::PointStamped>("out/goal/max_reward_point", 1);
 
     nh.param("map/resolution",              _resolution, 0.2);
     nh.param("map/x_size",                  _x_size, 50.0);
@@ -157,6 +168,23 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
     _start_pt_rounding_eror(0) = ((_start_pt(0) * _inv_resolution) - round(_start_pt(0) * _inv_resolution)) * _resolution;
     _start_pt_rounding_eror(1) = ((_start_pt(1) * _inv_resolution) - round(_start_pt(1) * _inv_resolution)) * _resolution;
     _start_pt_rounding_eror(2) = ((_start_pt(2) * _inv_resolution) - round(_start_pt(2) * _inv_resolution)) * _resolution;
+
+    tf::Quaternion quat(_odom.pose.pose.orientation.x,
+                        _odom.pose.pose.orientation.y,
+                        _odom.pose.pose.orientation.z,
+                        _odom.pose.pose.orientation.w);
+        
+    tf::Matrix3x3 m_odom(quat);
+    double roll, pitch, yaw;
+    m_odom.getRPY(roll, pitch, yaw);
+
+    // DEBUGGING
+    // std::cout << "yaw: " << yaw << std::endl;
+    
+    _desired_pt(0)  = _start_pt(0) + 5*cos(-yaw);
+    _desired_pt(1)  = _start_pt(1) - 5*sin(-yaw);
+    _desired_pt(2)  = _start_pt(2);
+
 
     // DEBUGGING
     // std::cout << "_start_pt_rounding_eror" << _start_pt_rounding_eror(0) << ", " << _start_pt_rounding_eror(1) << ", " << _start_pt_rounding_eror(2) << std::endl;
@@ -334,9 +362,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // std::cout << "cloud_fmm_vel cnt: " << cnt << std::endl;
     // std::cout << "cloud_fmm_vel.points.size: " << cloud_fmm_vel.points.size() << std::endl;
 
-    sensor_msgs::PointCloud2 esdfMap;
-    pcl::toROSMsg(cloud_fmm_vel, esdfMap);
-    _map_fmm_vel_vis_pub.publish(esdfMap);
+    sensor_msgs::PointCloud2 velMap;
+    pcl::toROSMsg(cloud_fmm_vel, velMap);
+    _map_fmm_vel_vis_pub.publish(velMap);
 
     ///////////////////
     // LOCAL FMM PCL //
@@ -365,16 +393,121 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // std::cout << "cloud_fmm_time cnt: " << cnt << std::endl;
     // std::cout << "cloud_fmm_time.points.size: " << cloud_fmm_time.points.size() << std::endl;
 
-    sensor_msgs::PointCloud2 fmmMap;
-    pcl::toROSMsg(cloud_fmm_time, fmmMap);
-    _map_fmm_timel_vis_pub.publish(fmmMap);
+    sensor_msgs::PointCloud2 timeMap;
+    pcl::toROSMsg(cloud_fmm_time, timeMap);
+    _map_fmm_time_vis_pub.publish(timeMap);
+
+
+
+
+
+    //////////////////////
+    // LOCAL REWARD PCL //
+    //////////////////////
+
+    pcl::PointCloud<pcl::PointXYZI> cloud_fmm_reward;
+    cloud_fmm_reward.height = 1;
+    cloud_fmm_reward.is_dense = true;
+    cloud_fmm_reward.header.frame_id = "odom";
+
+    float reward;
+    cnt = 0;
+    long int min_idx = 0;
+    float min_dist = 10.0;
+
+    for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
+    {
+        // Compute distance to desired point
+        pcl::PointXYZI fmm_reward_pt = idx2pt(grid_idx);
+        reward = sqrt((fmm_reward_pt.x - _desired_pt(0))*(fmm_reward_pt.x - _desired_pt(0))
+                    + (fmm_reward_pt.y - _desired_pt(1))*(fmm_reward_pt.y - _desired_pt(1))
+                    + (fmm_reward_pt.z - _desired_pt(2))*(fmm_reward_pt.z - _desired_pt(2))) // DISTANCE FROM GOAL POINT IN FRONHT OF ROBOT
+                    
+                    - abs(fmm_reward_pt.z - _desired_pt(2)); // PENALIZE VERTICAL MOVEMENTS
+
+        fmm_reward_pt.intensity = reward;
+
+        // Push traversable points to pcl
+        if(grid_fmm_3d[grid_idx].getArrivalTime() > 0 && grid_fmm_3d[grid_idx].getArrivalTime() < 99999)
+        {
+            cnt++;
+            cloud_fmm_reward.push_back(fmm_reward_pt);
+
+            // Find point farthest away
+            if (reward < min_dist)
+            {
+                min_idx = cnt - 1;
+                min_dist = reward;
+            }
+            
+        }
+
+
+    }
+    cloud_fmm_reward.width = cnt;
+
+    // DEBUGGING
+    // std::cout << "cloud_fmm_reward cnt: " << cnt << std::endl;
+    // std::cout << "cloud_fmm_reward.points.size: " << cloud_fmm_time.points.size() << std::endl;
+
+    sensor_msgs::PointCloud2 rewardMap;
+    pcl::toROSMsg(cloud_fmm_reward, rewardMap);
+    _map_fmm_reward_vis_pub.publish(rewardMap);
+
+    std::cout << "min_idx: " << min_idx << std::endl;
+
+    ////////////////////////////////////
+    // GOAL POINT SELECTION (TESITNG) //
+    ////////////////////////////////////
+
+    if(cloud_fmm_reward.width > 0)
+    {
+
+        max_reward_pt = {cloud_fmm_reward.points[min_idx].x,
+                         cloud_fmm_reward.points[min_idx].y,
+                         cloud_fmm_reward.points[min_idx].z};
+                                  
+
+    std::cout << "inside if: cloud_fmm_reward.width: " << cloud_fmm_reward.width << std::endl;
+    std::cout << "inside if: min_idx: " << min_idx << std::endl;
+    std::cout << "inside if: min_dist: " << min_dist << std::endl;
+    std::cout << "inside if: cloud_fmm_reward.points[min_idx].x: " << cloud_fmm_reward.points[min_idx].x << std::endl;
+    std::cout << "inside if: cloud_fmm_reward.points[min_idx].x: " << cloud_fmm_reward.points[min_idx].x << std::endl;
+    std::cout << "inside if: cloud_fmm_reward.points[min_idx].y: " << cloud_fmm_reward.points[min_idx].y << std::endl;
+    std::cout << "inside if: cloud_fmm_reward.points[min_idx].z: " << cloud_fmm_reward.points[min_idx].z << std::endl;
+
+        geometry_msgs::PointStamped max_reward_point;
+        max_reward_point.header.stamp = ros::Time::now();
+        max_reward_point.header.frame_id = "odom";
+        max_reward_point.point.x = max_reward_pt(0);
+        max_reward_point.point.y = max_reward_pt(1);
+        max_reward_point.point.z = max_reward_pt(2);
+            
+        geometry_msgs::PoseStamped max_reward_pose;
+        max_reward_pose.header.stamp = ros::Time::now();
+        max_reward_pose.header.frame_id = "odom";
+        max_reward_pose.pose.position.x = max_reward_pt(0);
+        max_reward_pose.pose.position.y = max_reward_pt(1);
+        max_reward_pose.pose.position.z = max_reward_pt(2);
+        max_reward_pose.pose.orientation.x = 0.0;
+        max_reward_pose.pose.orientation.y = 0.0;
+        max_reward_pose.pose.orientation.z = 0.0;
+        max_reward_pose.pose.orientation.w = 1.0;
+
+        _max_reward_point_pub.publish(max_reward_point);
+        _max_reward_pose_pub.publish(max_reward_pose);
+    }
+
+
+
+
+
 
     /////////////////////////////
     // LOCAL PATH (FMM SOLVER) //
     /////////////////////////////
 
-    Vector3d start_offset = {3, 0, 0};
-    Vector3d startIdx3d = (start_offset - _map_origin) * _inv_resolution;
+    Vector3d startIdx3d = (max_reward_pt - _map_origin) * _inv_resolution;
     Coord3D end_point = {(unsigned int)round(startIdx3d[0]), (unsigned int)round(startIdx3d[1]), (unsigned int)round(startIdx3d[2])};
     unsigned int goalIdx;
     grid_fmm_3d.coord2idx(end_point, goalIdx);
