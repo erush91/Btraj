@@ -433,7 +433,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     for(int path_idx = 0; path_idx < int(path_coord.size()); path_idx++)
     {
 
-        std::vector<float> path_pt_xyz = {path_coord[path_idx](0),
+        vector<float> path_pt_xyz = {path_coord[path_idx](0),
                                           path_coord[path_idx](1),
                                           path_coord[path_idx](2)};
         vector<long int> path_pt_idx = ptVect2idx(path_pt_xyz);
@@ -441,20 +441,36 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         vector<float> robot_pt_xyz = {0.5 * _resolution + _start_pt(0) - _start_pt_rounding_eror(0),
                                       0.5 * _resolution + _start_pt(1) - _start_pt_rounding_eror(1),
                                       0.5 * _resolution + _start_pt(2) - _start_pt_rounding_eror(2)};
+
+        vector<float> robot_path_vector_xyz = robot_pt_xyz;//};
+
         vector<long int> robot_pt_idx = ptVect2idx(robot_pt_xyz);
 
         float path_pt_distance = sqrt(path_pt_xyz[0]*path_pt_xyz[0] + path_pt_xyz[1]*path_pt_xyz[1] + path_pt_xyz[2]*path_pt_xyz[2]);
-        
         int num_interpolated_pts_to_check = ceil(2 * _inv_resolution * (float)path_pt_distance);
 
         for(int interp_idx = 1; interp_idx < num_interpolated_pts_to_check + 1; interp_idx++)
         {
             
-            float percent_dist = interp_idx / num_interpolated_pts_to_check;
-            vector<float> check_pt_xyz = {percent_dist * path_pt_xyz[0],
-                                          percent_dist * path_pt_xyz[1],
-                                          percent_dist * path_pt_xyz[2]};
-                        
+            float percent_dist = (float)interp_idx / (float)num_interpolated_pts_to_check;
+            vector<float> check_pt_xyz = {percent_dist * (path_pt_xyz[0] - robot_pt_xyz[0]) + robot_pt_xyz[0],
+                                          percent_dist * (path_pt_xyz[1] - robot_pt_xyz[1]) + robot_pt_xyz[1],
+                                          percent_dist * (path_pt_xyz[2] - robot_pt_xyz[2]) + robot_pt_xyz[2]};
+
+
+            // vector<float> check_vect_xyz;
+            // std::transform(path_pt_xyz.begin(), path_pt_xyz.end(), robot_pt_xyz.begin(), check_pt_xyz.begin(), 
+            //     std::minus<float>());
+
+            // std::transform(check_pt_xyz.begin(), check_pt_xyz.end(), check_vect_xyz.begin(),
+            //     std::bind(std::multiplies<float>(), std::placeholders::_1, );
+
+            
+            // vector<float> check_vect_xyz;
+            // // std::transform applies std::multiplies to the whole array 
+            // std::transform(check_pt_xyz.bein(), check_pt_xyz.end(), check_vect_xyz.begin(), check_vect_xyz.begin(), std::multiplies<float>()); 
+                
+
             // vector<float> check_pt = path_pt_xyz / (float)num_interpolated_pts_to_check * interp_idx;
             vector<long int> check_pt_idx = ptVect2idx(check_pt_xyz);
             
@@ -475,8 +491,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 line_of_sight_vector_msg.pose.orientation.z = 0.0;
                 line_of_sight_vector_msg.pose.orientation.w = 1.0;
                 line_of_sight_vector_msg.scale.x = 0.01;
-                line_of_sight_vector_msg.scale.y = 0.02;
-                line_of_sight_vector_msg.scale.z = 0.02;
+                line_of_sight_vector_msg.scale.y = 0.05;
+                line_of_sight_vector_msg.scale.z = 0.05;
                 line_of_sight_vector_msg.color.a = 1.0; // Don't forget to set the alpha!
                 line_of_sight_vector_msg.color.r = 0.0;
                 line_of_sight_vector_msg.color.g = 1.0;
@@ -516,8 +532,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 collision_vector_msg.pose.orientation.z = 0.0;
                 collision_vector_msg.pose.orientation.w = 1.0;
                 collision_vector_msg.scale.x = 0.01;
-                collision_vector_msg.scale.y = 0.02;
-                collision_vector_msg.scale.z = 0.02;
+                collision_vector_msg.scale.y = 0.05;
+                collision_vector_msg.scale.z = 0.05;
                 collision_vector_msg.color.a = 1.0; // Don't forget to set the alpha!
                 collision_vector_msg.color.r = 1.0;
                 collision_vector_msg.color.g = 0.0;
@@ -541,7 +557,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             }
 
         _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
-        // _collision_vector_vis_pub.publish(collision_vectors_msg);
+        _collision_vector_vis_pub.publish(collision_vectors_msg);
 
         }
            
