@@ -189,6 +189,15 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
     // DEBUGGING
     // std::cout << "_start_pt_rounding_eror" << _start_pt_rounding_eror(0) << ", " << _start_pt_rounding_eror(1) << ", " << _start_pt_rounding_eror(2) << std::endl;
 }
+vector<long int> pt2idx(pcl::PointXYZI pt)
+{
+    long int  x_idx = ((pt.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
+    long int  y_idx = ((pt.y - _start_pt(1) - _map_origin(1)) * _inv_resolution);
+    long int  z_idx = ((pt.z - _start_pt(2) - _map_origin(2)) * _inv_resolution);
+    long int grid_idx = x_idx + y_idx * x_size + z_idx * x_size * y_size;
+    vector<long int> idx = {x_idx, y_idx, z_idx, grid_idx};
+    return idx;
+}
 
 vector<long int> ptPcl2idx(pcl::PointXYZI pt)
 {
@@ -420,11 +429,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         // Compute distance to desired point
         pcl::PointXYZI fmm_reward_pt = idx2pt(grid_idx);
         reward = sqrt((fmm_reward_pt.x - _desired_pt(0))*(fmm_reward_pt.x - _desired_pt(0))
-                    + (fmm_reward_pt.y - _desired_pt(1))*(fmm_reward_pt.y - _desired_pt(1))
-                    + (fmm_reward_pt.z - _desired_pt(2))*(fmm_reward_pt.z - _desired_pt(2))) // DISTANCE FROM GOAL POINT IN FRONHT OF ROBOT
+                    + (fmm_reward_pt.y - _desired_pt(1))*(fmm_reward_pt.y - _desired_pt(1))); // DISTANCE FROM GOAL POINT IN FRONHT OF ROBOT
                     
-                    - abs(fmm_reward_pt.z - _desired_pt(2)); // PENALIZE VERTICAL MOVEMENTS
-
         fmm_reward_pt.intensity = reward;
 
         // Push traversable points to pcl
@@ -460,35 +466,36 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // GOAL POINT SELECTION (TESITNG) //
     ////////////////////////////////////
 
+
+    pcl::PointXYZI fmm_max_reward_pt;
+    vector<long int> fmm_max_reward_idx;
+
     if(cloud_fmm_reward.width > 0)
     {
-
-        max_reward_pt = {cloud_fmm_reward.points[min_idx].x,
-                         cloud_fmm_reward.points[min_idx].y,
-                         cloud_fmm_reward.points[min_idx].z};
+        fmm_max_reward_pt = cloud_fmm_reward.points[min_idx];
                                   
-
-    std::cout << "inside if: cloud_fmm_reward.width: " << cloud_fmm_reward.width << std::endl;
-    std::cout << "inside if: min_idx: " << min_idx << std::endl;
-    std::cout << "inside if: min_dist: " << min_dist << std::endl;
-    std::cout << "inside if: cloud_fmm_reward.points[min_idx].x: " << cloud_fmm_reward.points[min_idx].x << std::endl;
-    std::cout << "inside if: cloud_fmm_reward.points[min_idx].x: " << cloud_fmm_reward.points[min_idx].x << std::endl;
-    std::cout << "inside if: cloud_fmm_reward.points[min_idx].y: " << cloud_fmm_reward.points[min_idx].y << std::endl;
-    std::cout << "inside if: cloud_fmm_reward.points[min_idx].z: " << cloud_fmm_reward.points[min_idx].z << std::endl;
+        // DEBUGGING
+        // std::cout << "inside if: cloud_fmm_reward.width: " << cloud_fmm_reward.width << std::endl;
+        // std::cout << "inside if: min_idx: " << min_idx << std::endl;
+        // std::cout << "inside if: min_dist: " << min_dist << std::endl;
+        // std::cout << "inside if: cloud_fmm_reward.points[min_idx].x: " << cloud_fmm_reward.points[min_idx].x << std::endl;
+        // std::cout << "inside if: cloud_fmm_reward.points[min_idx].x: " << cloud_fmm_reward.points[min_idx].x << std::endl;
+        // std::cout << "inside if: cloud_fmm_reward.points[min_idx].y: " << cloud_fmm_reward.points[min_idx].y << std::endl;
+        // std::cout << "inside if: cloud_fmm_reward.points[min_idx].z: " << cloud_fmm_reward.points[min_idx].z << std::endl;
 
         geometry_msgs::PointStamped max_reward_point;
         max_reward_point.header.stamp = ros::Time::now();
         max_reward_point.header.frame_id = "odom";
-        max_reward_point.point.x = max_reward_pt(0);
-        max_reward_point.point.y = max_reward_pt(1);
-        max_reward_point.point.z = max_reward_pt(2);
+        max_reward_point.point.x = fmm_max_reward_pt.x;
+        max_reward_point.point.y = fmm_max_reward_pt.y;
+        max_reward_point.point.z = fmm_max_reward_pt.z;
             
         geometry_msgs::PoseStamped max_reward_pose;
         max_reward_pose.header.stamp = ros::Time::now();
         max_reward_pose.header.frame_id = "odom";
-        max_reward_pose.pose.position.x = max_reward_pt(0);
-        max_reward_pose.pose.position.y = max_reward_pt(1);
-        max_reward_pose.pose.position.z = max_reward_pt(2);
+        max_reward_pose.pose.position.x = fmm_max_reward_pt.x;
+        max_reward_pose.pose.position.y = fmm_max_reward_pt.y;
+        max_reward_pose.pose.position.z = fmm_max_reward_pt.z;
         max_reward_pose.pose.orientation.x = 0.0;
         max_reward_pose.pose.orientation.y = 0.0;
         max_reward_pose.pose.orientation.z = 0.0;
@@ -496,18 +503,25 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
         _max_reward_point_pub.publish(max_reward_point);
         _max_reward_pose_pub.publish(max_reward_pose);
+
     }
+    else
+    {
+        fmm_max_reward_pt.x = _start_pt(0);
+        fmm_max_reward_pt.x = _start_pt(1);
+        fmm_max_reward_pt.x = _start_pt(2);
+    }
+    fmm_max_reward_idx = pt2idx(fmm_max_reward_pt);
 
 
-
-
+    
 
 
     /////////////////////////////
     // LOCAL PATH (FMM SOLVER) //
     /////////////////////////////
-
-    Vector3d startIdx3d = (max_reward_pt - _map_origin) * _inv_resolution;
+    Vector3d start_offset = {0.0, 0.0, 0.0};
+    Vector3d startIdx3d = (start_offset - _map_origin) * _inv_resolution;
     Coord3D end_point = {(unsigned int)round(startIdx3d[0]), (unsigned int)round(startIdx3d[1]), (unsigned int)round(startIdx3d[2])};
     unsigned int goalIdx;
     grid_fmm_3d.coord2idx(end_point, goalIdx);
@@ -520,7 +534,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     vector<Vector3d> path_coord;
     int cnt2 = 0;
 
-    if(grad3D.gradient_descent(grid_fmm_3d, goalIdx, path3D, path_vels, time) == -1)
+    unsigned int fmm_max_reward_grid_idx = (unsigned int)fmm_max_reward_idx[3];
+    if(grad3D.gradient_descent(grid_fmm_3d, fmm_max_reward_grid_idx, path3D, path_vels, time) == -1)
     {
         std::cout << "GRADIENT DESCENT FMM ERROR" << std::endl;
     }
