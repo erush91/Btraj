@@ -71,6 +71,8 @@ ros::Publisher _map_fmm_timel_vis_pub;
 ros::Publisher _line_of_sight_path_vis_pub;
 ros::Publisher _line_of_sight_vector_vis_pub;
 ros::Publisher _collision_vector_vis_pub;
+ros::Publisher _goal_point_pub;
+ros::Publisher _goal_pose_pub;
 
 visualization_msgs::MarkerArray line_of_sight_vectors_msg;
     
@@ -78,7 +80,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map);
 void rcvOdometryCallbck(const nav_msgs::Odometry odom);
 void publishVisPath(vector<Vector3d> path, ros::Publisher _path_vis_pub);
 double velMapping(double d);
-
 
 vector<long int> ptPcl2idx(pcl::PointXYZI pt);
 vector<long int> ptVect2idx(vector<float> pt);
@@ -102,6 +103,8 @@ int main(int argc, char** argv)
     _line_of_sight_path_vis_pub     = nh.advertise<visualization_msgs::MarkerArray>("goal/line_of_sight_path/viz", 1);
     _line_of_sight_vector_vis_pub   = nh.advertise<visualization_msgs::MarkerArray>("goal/line_of_sight/vectors/viz", 1);
     _collision_vector_vis_pub       = nh.advertise<visualization_msgs::MarkerArray>("goal/collision/vectors/viz", 1);
+    _goal_pose_pub                  = nh.advertise<geometry_msgs::PoseStamped>("goal/pose", 1);
+    _goal_point_pub                 = nh.advertise<geometry_msgs::PointStamped>("goal/point", 1);
 
     nh.param("map/resolution",  _resolution, 0.2);
     nh.param("map/x_size",      _x_size, 50.0);
@@ -136,7 +139,6 @@ int main(int argc, char** argv)
     return 0;
 }
 
-
 void rcvOdometryCallbck(const nav_msgs::Odometry odom)
 {
     _odom = odom;
@@ -152,9 +154,7 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
 
     // DEBUGGING
     // std::cout << "_start_pt_rounding_eror" << _start_pt_rounding_eror(0) << ", " << _start_pt_rounding_eror(1) << ", " << _start_pt_rounding_eror(2) << std::endl;
-
 }
-
 
 vector<long int> ptPcl2idx(pcl::PointXYZI pt)
 {
@@ -367,16 +367,16 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // LOCAL PATH (FMM SOLVER) //
     /////////////////////////////
 
-    Vector3d goal_offset = {3, 0, 0};
-    Vector3d startIdx3d = (goal_offset - _map_origin) * _inv_resolution;
-    Coord3D goal_point = {(unsigned int)round(startIdx3d[0]), (unsigned int)round(startIdx3d[1]), (unsigned int)round(startIdx3d[2])};
+    Vector3d start_offset = {3, 0, 0};
+    Vector3d startIdx3d = (start_offset - _map_origin) * _inv_resolution;
+    Coord3D end_point = {(unsigned int)round(startIdx3d[0]), (unsigned int)round(startIdx3d[1]), (unsigned int)round(startIdx3d[2])};
     unsigned int goalIdx;
-    grid_fmm_3d.coord2idx(goal_point, goalIdx);
+    grid_fmm_3d.coord2idx(end_point, goalIdx);
 
     Path3D path3D;
     vector<double> path_vels, time;
     GradientDescent< FMGrid3D > grad3D;
-    grid_fmm_3d.coord2idx(goal_point, goalIdx);
+    grid_fmm_3d.coord2idx(end_point, goalIdx);
 
     vector<Vector3d> path_coord;
     int cnt2 = 0;
@@ -426,58 +426,47 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     vector<Vector3d> path_line_of_sight;
     int line_of_sight_idx = 0;
     int collision_idx = 0;
+    Vector3d line_of_sight_pt;
+    Vector3d collision_pt;
+    Vector3d goal_pt;
+    float check_vect_dist = 0;
+    float check_vect_dist_max = 0;
 
     visualization_msgs::MarkerArray line_of_sight_vectors_msg;
     visualization_msgs::MarkerArray collision_vectors_msg;
 
     for(int path_idx = 0; path_idx < int(path_coord.size()); path_idx++)
     {
-
         vector<float> path_pt_xyz = {path_coord[path_idx](0),
-                                          path_coord[path_idx](1),
-                                          path_coord[path_idx](2)};
-        vector<long int> path_pt_idx = ptVect2idx(path_pt_xyz);
-
+                                     path_coord[path_idx](1),
+                                     path_coord[path_idx](2)};
         vector<float> robot_pt_xyz = {0.5 * _resolution + _start_pt(0) - _start_pt_rounding_eror(0),
                                       0.5 * _resolution + _start_pt(1) - _start_pt_rounding_eror(1),
                                       0.5 * _resolution + _start_pt(2) - _start_pt_rounding_eror(2)};
-
-        vector<float> robot_path_vector_xyz = robot_pt_xyz;//};
-
         vector<long int> robot_pt_idx = ptVect2idx(robot_pt_xyz);
-
         float path_pt_distance = sqrt(path_pt_xyz[0]*path_pt_xyz[0] + path_pt_xyz[1]*path_pt_xyz[1] + path_pt_xyz[2]*path_pt_xyz[2]);
         int num_interpolated_pts_to_check = ceil(2 * _inv_resolution * (float)path_pt_distance);
+        bool collision_detected = 0;
 
         for(int interp_idx = 1; interp_idx < num_interpolated_pts_to_check + 1; interp_idx++)
         {
-            
             float percent_dist = (float)interp_idx / (float)num_interpolated_pts_to_check;
-            vector<float> check_pt_xyz = {percent_dist * (path_pt_xyz[0] - robot_pt_xyz[0]) + robot_pt_xyz[0],
-                                          percent_dist * (path_pt_xyz[1] - robot_pt_xyz[1]) + robot_pt_xyz[1],
-                                          percent_dist * (path_pt_xyz[2] - robot_pt_xyz[2]) + robot_pt_xyz[2]};
-
-
-            // vector<float> check_vect_xyz;
-            // std::transform(path_pt_xyz.begin(), path_pt_xyz.end(), robot_pt_xyz.begin(), check_pt_xyz.begin(), 
-            //     std::minus<float>());
-
-            // std::transform(check_pt_xyz.begin(), check_pt_xyz.end(), check_vect_xyz.begin(),
-            //     std::bind(std::multiplies<float>(), std::placeholders::_1, );
-
-            
-            // vector<float> check_vect_xyz;
-            // // std::transform applies std::multiplies to the whole array 
-            // std::transform(check_pt_xyz.bein(), check_pt_xyz.end(), check_vect_xyz.begin(), check_vect_xyz.begin(), std::multiplies<float>()); 
-                
-
-            // vector<float> check_pt = path_pt_xyz / (float)num_interpolated_pts_to_check * interp_idx;
+            vector<float> check_vect_xyz = {percent_dist * (path_pt_xyz[0] - robot_pt_xyz[0]),
+                                            percent_dist * (path_pt_xyz[1] - robot_pt_xyz[1]),
+                                            percent_dist * (path_pt_xyz[2] - robot_pt_xyz[2])};
+            check_vect_dist = sqrt(check_vect_xyz[0]*check_vect_xyz[0] + check_vect_xyz[1]*check_vect_xyz[1] + check_vect_xyz[2]*check_vect_xyz[2]);
+            vector<float> check_pt_xyz = {check_vect_xyz[0] + robot_pt_xyz[0],
+                                          check_vect_xyz[1] + robot_pt_xyz[1],
+                                          check_vect_xyz[2] + robot_pt_xyz[2]};
             vector<long int> check_pt_idx = ptVect2idx(check_pt_xyz);
-            
             float d = grid_fmm_3d[check_pt_idx[3]].getOccupancy();
-            if(d > 0)
+            if((d <= 0) || collision_detected)
             {
-                visualization_msgs::Marker line_of_sight_vector_msg;      
+                collision_detected = 1;
+            }
+            if(!collision_detected)
+            {
+                visualization_msgs::Marker line_of_sight_vector_msg;
                 line_of_sight_vector_msg.header.stamp = ros::Time();
                 line_of_sight_vector_msg.header.frame_id = "odom";
                 line_of_sight_vector_msg.id = line_of_sight_idx;
@@ -490,9 +479,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 line_of_sight_vector_msg.pose.orientation.y = 0.0;
                 line_of_sight_vector_msg.pose.orientation.z = 0.0;
                 line_of_sight_vector_msg.pose.orientation.w = 1.0;
-                line_of_sight_vector_msg.scale.x = 0.01;
-                line_of_sight_vector_msg.scale.y = 0.05;
-                line_of_sight_vector_msg.scale.z = 0.05;
+                line_of_sight_vector_msg.scale.x = 0.001;
+                line_of_sight_vector_msg.scale.y = 0.03;
+                line_of_sight_vector_msg.scale.z = 0.03;
                 line_of_sight_vector_msg.color.a = 1.0; // Don't forget to set the alpha!
                 line_of_sight_vector_msg.color.r = 0.0;
                 line_of_sight_vector_msg.color.g = 1.0;
@@ -505,19 +494,25 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 q.z = robot_pt(2);
                 line_of_sight_vector_msg.points.push_back(q);
                 geometry_msgs::Point p;
-                vector<int> check_xyz_idx = {check_pt_idx[0], check_pt_idx[1], check_pt_idx[2]};
-                Vector3d check_pt = xyz2ptVect(check_xyz_idx);
-                p.x = check_pt(0);
-                p.y = check_pt(1);
-                p.z = check_pt(2);
+                vector<long int> light_of_sight_pt_idx = check_pt_idx;
+                vector<int> line_of_sight_xyz_idx = {light_of_sight_pt_idx[0], light_of_sight_pt_idx[1], light_of_sight_pt_idx[2]};
+                line_of_sight_pt = xyz2ptVect(line_of_sight_xyz_idx);
+                p.x = line_of_sight_pt(0);
+                p.y = line_of_sight_pt(1);
+                p.z = line_of_sight_pt(2);
                 line_of_sight_vector_msg.points.push_back(p);
                 line_of_sight_vectors_msg.markers.push_back(line_of_sight_vector_msg);
+                if(check_vect_dist > check_vect_dist_max)
+                {
+                    goal_pt(0) = line_of_sight_pt(0);
+                    goal_pt(1) = line_of_sight_pt(1);
+                    goal_pt(2) = line_of_sight_pt(2);
+                    check_vect_dist_max = check_vect_dist;
+                }
                 line_of_sight_idx++;
             }
             else
             {
-                std::cout << "ERRRRRRROOOOOOORRRRRR:" << d << std::endl;
-
                 visualization_msgs::Marker collision_vector_msg;      
                 collision_vector_msg.header.stamp = ros::Time();
                 collision_vector_msg.header.frame_id = "odom";
@@ -531,9 +526,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 collision_vector_msg.pose.orientation.y = 0.0;
                 collision_vector_msg.pose.orientation.z = 0.0;
                 collision_vector_msg.pose.orientation.w = 1.0;
-                collision_vector_msg.scale.x = 0.01;
-                collision_vector_msg.scale.y = 0.05;
-                collision_vector_msg.scale.z = 0.05;
+                collision_vector_msg.scale.x = 0.001;
+                collision_vector_msg.scale.y = 0.03;
+                collision_vector_msg.scale.z = 0.03;
                 collision_vector_msg.color.a = 1.0; // Don't forget to set the alpha!
                 collision_vector_msg.color.r = 1.0;
                 collision_vector_msg.color.g = 0.0;
@@ -541,55 +536,49 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 geometry_msgs::Point q;
                 vector<int> robot_xyz_idx = {robot_pt_idx[0], robot_pt_idx[1], robot_pt_idx[2]};
                 Vector3d robot_pt = xyz2ptVect(robot_xyz_idx);
-                q.x = robot_pt(0); //0.5 * _resolution + _start_pt(0) - _start_pt_rounding_eror(0);
-                q.y = robot_pt(1); //0.5 * _resolution + _start_pt(1) - _start_pt_rounding_eror(1);
-                q.z = robot_pt(2); //0.5 * _resolution + _start_pt(2) - _start_pt_rounding_eror(2);
+                q.x = robot_pt(0);
+                q.y = robot_pt(1);
+                q.z = robot_pt(2);
                 collision_vector_msg.points.push_back(q);
                 geometry_msgs::Point p;
-                vector<int> check_xyz_idx = {check_pt_idx[0], check_pt_idx[1], check_pt_idx[2]};
-                Vector3d check_pt = xyz2ptVect(check_xyz_idx);
-                p.x = check_pt(0);
-                p.y = check_pt(1);
-                p.z = check_pt(2);
+                vector<long int> collision_pt_idx = check_pt_idx;
+                vector<int> collision_xyz_idx = {collision_pt_idx[0], collision_pt_idx[1], collision_pt_idx[2]};
+                collision_pt = xyz2ptVect(collision_xyz_idx);
+                p.x = collision_pt(0);
+                p.y = collision_pt(1);
+                p.z = collision_pt(2);
                 collision_vector_msg.points.push_back(p);
                 collision_vectors_msg.markers.push_back(collision_vector_msg);
                 collision_idx++;
+                collision_detected = 1;
             }
-
-        _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
-        _collision_vector_vis_pub.publish(collision_vectors_msg);
-
         }
-           
-        // Vector3d goal_pt = path_coord[path_idx] - _start_pt - _map_origin;
-        // std::cout << "goal_pt[" << path_idx << "]:" << goal_pt(0) << ", " << goal_pt(1) << ", " << goal_pt(2) << std::endl;
         
-        // Vector3d goalPtIdx3d = goal_pt * _inv_resolution;
+        geometry_msgs::PointStamped goal_point;
+        goal_point.header.stamp = ros::Time::now();
+        goal_point.header.frame_id = "odom";
+        goal_point.point.x = goal_pt(0);
+        goal_point.point.y = goal_pt(1);
+        goal_point.point.z = goal_pt(2);
+            
+        geometry_msgs::PoseStamped goal_pose;
+        goal_pose.header.stamp = ros::Time::now();
+        goal_pose.header.frame_id = "odom";
+        goal_pose.pose.position.x = goal_pt(0);
+        goal_pose.pose.position.y = goal_pt(1);
+        goal_pose.pose.position.z = goal_pt(2);
+        goal_pose.pose.orientation.x = 0.0;
+        goal_pose.pose.orientation.y = 0.0;
+        goal_pose.pose.orientation.z = 0.0;
+        goal_pose.pose.orientation.w = 1.0;
         
-        // Coord3D goal_point = {(unsigned int)round(goalPtIdx3d[0]), (unsigned int)round(goalPtIdx3d[1]), (unsigned int)round(goalPtIdx3d[2])};
-        // std::cout << "goalPtIdx3d[" << path_idx << "]:" << goal_point[0] << ", " << goal_point[1] << ", " << goal_point[2] << std::endl;
-
-        // unsigned int pathPtIdx;
-        // grid_fmm_3d.coord2idx(path_pt_xyz, pathPtIdx);
-        // float occ = grid_fmm_3d[pathPtIdx].getOccupancy();
-        // std::cout << "occ[" << path_idx << "]:" << occ << std::endl;
-        // std::cout << std::endl;
-
-        // if(path_idx == int(path_coord.size()) - 1)
-        // {
-        //     for(int interp_idx = 1; interp_idx < num_interpolated_pts_to_check + 1; interp_idx++)
-        //     {
-        //         // DEBUGGING
-        //         // std::cout << "num_interpolated_pts_to_check: " << num_interpolated_pts_to_check << std::endl;
-        //         Vector3d line_of_sight_pt = path_pt / num_interpolated_pts_to_check * interp_idx + _start_pt;
-        //         path_line_of_sight.push_back(line_of_sight_pt);
-        //     }            
-        // publishVisPath(path_line_of_sight, _line_of_sight_path_vis_pub);
-        // }
+        _goal_point_pub.publish(goal_point);
+        _goal_pose_pub.publish(goal_pose);
+        // _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
+        // _collision_vector_vis_pub.publish(collision_vectors_msg);
     }
     std::cout << std::endl;
     std::cout << std::endl;
-    
 }
 
 void publishVisPath(vector<Vector3d> path, ros::Publisher _path_vis_pub)
