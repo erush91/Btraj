@@ -270,6 +270,12 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     pcl::PointCloud<pcl::PointXYZI> cloud;  
     pcl::fromROSMsg(pointcloud_map, cloud);
 
+    if(cloud.size() == 0)
+    {
+        std::cout << "ERROR: TRAVERSABLE POINT CLOUD IS EMPTY" << std::endl;
+        return;
+    }
+
     // DEBUGGING
     // std::cout << "_start_pt: " << _start_pt(0) << ", " << _start_pt(1) << ", " << _start_pt(2) << std::endl;
     
@@ -319,7 +325,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     grid_fmm_3d.setOccupiedCells(std::move(obs));
     grid_fmm_3d.setLeafSize(_resolution);
 
-    std::cout << cntt << std::endl;
+    // DEBUGGING
+    // std::cout << cntt << std::endl;
 
     ////////////////////
     // LOCAL ESDF PCL //
@@ -356,57 +363,64 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // LOCAL FMM MAP (ARRIVAL TIME) //
     //////////////////////////////////
 
-//   pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtree (new pcl::KdTreeFLANN<pcl::PointXYZI>);
-//   kdtree->setInputCloud(&cloud_fmm_vel);
+    // Record start time
+    auto start = std::chrono::high_resolution_clock::now();
 
-//   pcl::PointXYZ searchPoint;
+    // K nearest neighbor search
 
-//   searchPoint.x = _start_pt(0);
-//   searchPoint.y = _start_pt(1);
-//   searchPoint.z = _start_pt(2);
+    pcl::KdTreeFLANN<pcl::PointXYZI> kdtree;
+    kdtree.setInputCloud (cloud_fmm_vel);
+    pcl::PointXYZI searchPoint;
+    searchPoint.x = _start_pt(0);
+    searchPoint.y = _start_pt(1);
+    searchPoint.z = _start_pt(2);
 
-//   // K nearest neighbor search
+    int K = 10;
 
-//   int K = 10;
+    std::vector<int> pointIdxNKNSearch(K);
+    std::vector<float> pointNKNSquaredDistance(K);
 
-//   std::vector<int> pointIdxNKNSearch(K);
-//   std::vector<float> pointNKNSquaredDistance(K);
+    std::cout << "K nearest neighbor search at (" << searchPoint.x 
+                << " " << searchPoint.y 
+                << " " << searchPoint.z
+                << ") with K=" << K << std::endl;
 
-//   std::cout << "K nearest neighbor search at (" << searchPoint.x 
-//             << " " << searchPoint.y 
-//             << " " << searchPoint.z
-//             << ") with K=" << K << std::endl;
+    if ( kdtree.nearestKSearch (searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 )
+    {
+        for (std::size_t i = 0; i < pointIdxNKNSearch.size (); ++i)
+        std::cout << "    "  <<   cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].x 
+                    << " " << cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].y 
+                    << " " << cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].z 
+                    << " (squared distance: " << pointNKNSquaredDistance[i] << ")" << std::endl;
+    }
 
-//   if ( kdtree.nearestKSearch (searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 )
-//   {
-//     for (std::size_t i = 0; i < pointIdxNKNSearch.size (); ++i)
-//       std::cout << "    "  <<   cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].x 
-//                 << " " << cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].y 
-//                 << " " << cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].z 
-//                 << " (squared distance: " << pointNKNSquaredDistance[i] << ")" << std::endl;
-//   }
+    // Neighbors within radius search
 
-  // Neighbors within radius search
+    std::vector<int> pointIdxRadiusSearch;
+    std::vector<float> pointRadiusSquaredDistance;
 
-//   std::vector<int> pointIdxRadiusSearch;
-//   std::vector<float> pointRadiusSquaredDistance;
+    float radius = 1.0;
 
-//   float radius = 1.0;
-
-//   std::cout << "Neighbors within radius search at (" << searchPoint.x 
-//             << " " << searchPoint.y 
-//             << " " << searchPoint.z
-//             << ") with radius=" << radius << std::endl;
+    std::cout << "Neighbors within radius search at (" << searchPoint.x 
+                << " " << searchPoint.y 
+                << " " << searchPoint.z
+                << ") with radius=" << radius << std::endl;
 
 
-//   if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 0 )
-//   {
-//     for (std::size_t i = 0; i < pointIdxRadiusSearch.size (); ++i)
-//       std::cout << "    "  <<   cloud->points[ pointIdxRadiusSearch[i] ].x 
-//                 << " " << cloud->points[ pointIdxRadiusSearch[i] ].y 
-//                 << " " << cloud->points[ pointIdxRadiusSearch[i] ].z 
-//                 << " (squared distance: " << pointRadiusSquaredDistance[i] << ")" << std::endl;
-//   }
+    if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 0 )
+    {
+        for (std::size_t i = 0; i < pointIdxRadiusSearch.size (); ++i)
+        std::cout << "    "  <<   cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].x 
+                    << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].y 
+                    << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].z 
+                    << " (squared distance: " << pointRadiusSquaredDistance[i] << ")" << std::endl;
+    }
+
+
+
+
+
+
 
 
 
@@ -521,7 +535,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     pcl::toROSMsg(*cloud_fmm_reward, rewardMap);
     _map_fmm_reward_vis_pub.publish(rewardMap);
 
-    std::cout << "min_idx: " << min_idx << std::endl;
+    // DEBUGGING
+    // std::cout << "min_idx: " << min_idx << std::endl;
 
     //////////////////////////
     // GOAL POINT SELECTION //
@@ -822,13 +837,19 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // std::cout << sqrt(goal_point.point.x*goal_point.point.x + goal_point.point.y*goal_point.point.y + goal_point.point.z*goal_point.point.z) << std::endl;
     std::cout << "goal_point.point: " << goal_point.point.x << ", " << goal_point.point.y << ", " << goal_point.point.z << std::endl;
     
-    std::cout << std::endl;
-    std::cout << std::endl;
-    std::cout << std::endl;
 
     // DEBUGGING
     // _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
     // _collision_vector_vis_pub.publish(collision_vectors_msg);
+
+    // Record end time
+    auto finish = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = finish - start;
+    std::cout << "Elapsed time: " << elapsed.count() << " s\n";
+
+    std::cout << std::endl;
+    std::cout << std::endl;
+    std::cout << std::endl;
 
 }
 
