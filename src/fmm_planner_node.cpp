@@ -320,28 +320,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     std::cout << cntt << std::endl;
 
-    //////////////////////////////////
-    // LOCAL FMM MAP (ARRIVAL TIME) //
-    //////////////////////////////////
-
-    
-    vector<float> fmm_init_pt = {_start_pt(0), _start_pt(1), _start_pt(2)};
-    vector<long int> fmm_init_idx = ptVect2idx(fmm_init_pt);
-    vector<unsigned int> startIndices;
-    startIndices.push_back(fmm_init_idx[3]);
-
-    std::cout << "start pt occ: " << grid_fmm_3d[fmm_init_idx[3]].getOccupancy() << std::endl;
-
-    Solver<FMGrid3D>* fm_solver = new FMMStar<FMGrid3D>("FMM*_Dist", TIME); // LSM, FMM
-
-    fm_solver->setEnvironment(&grid_fmm_3d);
-    fm_solver->setInitialPoints(startIndices);
-    fm_solver->setup();
-    fm_solver->compute(1.0);
-
-    // Preventing memory leaks.
-    delete fm_solver;
-
     ////////////////////
     // LOCAL ESDF PCL //
     ////////////////////
@@ -372,6 +350,38 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     sensor_msgs::PointCloud2 velMap;
     pcl::toROSMsg(cloud_fmm_vel, velMap);
     _map_fmm_vel_vis_pub.publish(velMap);
+
+    //////////////////////////////////
+    // LOCAL FMM MAP (ARRIVAL TIME) //
+    //////////////////////////////////
+    
+    vector<float> fmm_init_pt = {_start_pt(0), _start_pt(1), _start_pt(2)};
+    vector<long int> fmm_init_idx = ptVect2idx(fmm_init_pt);
+
+    std::cout << "grid_fmm_3d[fmm_init_idx[3]].isOccupied(): " << grid_fmm_3d[fmm_init_idx[3]].isOccupied() << std::endl;
+    if(grid_fmm_3d[fmm_init_idx[3]].isOccupied())
+    {
+        fmm_init_pt = {_start_pt(0) + _resolution, _start_pt(1), _start_pt(2)};
+        vector<long int> fmm_init_idx = ptVect2idx(fmm_init_pt);
+        std::cout << "grid_fmm_3d[fmm_init_idx[3]].isOccupied() inside if: " << grid_fmm_3d[fmm_init_idx[3]].isOccupied() << std::endl;
+    }
+
+    vector<unsigned int> startIndices;
+    startIndices.push_back(fmm_init_idx[3]);
+
+
+
+    std::cout << "start pt occ: " << grid_fmm_3d[fmm_init_idx[3]].getOccupancy() << std::endl;
+
+    Solver<FMGrid3D>* fm_solver = new FMMStar<FMGrid3D>("FMM*_Dist", TIME); // LSM, FMM
+
+    fm_solver->setEnvironment(&grid_fmm_3d);
+    fm_solver->setInitialPoints(startIndices);
+    fm_solver->setup();
+    fm_solver->compute(1.0);
+
+    // Preventing memory leaks.
+    delete fm_solver;
 
     ///////////////////
     // LOCAL FMM PCL //
