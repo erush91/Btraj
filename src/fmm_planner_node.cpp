@@ -266,6 +266,8 @@ Vector3d xyz2ptVect(vector<int> xyz_idx)
 
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 {
+    // Record start time
+    auto start = std::chrono::high_resolution_clock::now();
 
     pcl::PointCloud<pcl::PointXYZI> cloud;  
     pcl::fromROSMsg(pointcloud_map, cloud);
@@ -359,14 +361,10 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     pcl::toROSMsg(*cloud_fmm_vel, velMap);
     _map_fmm_vel_vis_pub.publish(velMap);
 
-    //////////////////////////////////
-    // LOCAL FMM MAP (ARRIVAL TIME) //
-    //////////////////////////////////
+    ////////////////////////////////////////
+    // FIND TRAVERSABLE POINTS NEAR ROBOT //
+    ////////////////////////////////////////
 
-    // Record start time
-    auto start = std::chrono::high_resolution_clock::now();
-
-    // K nearest neighbor search
 
     pcl::KdTreeFLANN<pcl::PointXYZI> kdtree;
     kdtree.setInputCloud (cloud_fmm_vel);
@@ -375,25 +373,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     searchPoint.y = _start_pt(1);
     searchPoint.z = _start_pt(2);
 
-    int K = 10;
-
-    std::vector<int> pointIdxNKNSearch(K);
-    std::vector<float> pointNKNSquaredDistance(K);
-
-    std::cout << "K nearest neighbor search at (" << searchPoint.x 
-                << " " << searchPoint.y 
-                << " " << searchPoint.z
-                << ") with K=" << K << std::endl;
-
-    if ( kdtree.nearestKSearch (searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 )
-    {
-        for (std::size_t i = 0; i < pointIdxNKNSearch.size (); ++i)
-        std::cout << "    "  <<   cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].x 
-                    << " " << cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].y 
-                    << " " << cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].z 
-                    << " (squared distance: " << pointNKNSquaredDistance[i] << ")" << std::endl;
-    }
-
     // Neighbors within radius search
 
     std::vector<int> pointIdxRadiusSearch;
@@ -401,19 +380,21 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     float radius = 1.0;
 
-    std::cout << "Neighbors within radius search at (" << searchPoint.x 
-                << " " << searchPoint.y 
-                << " " << searchPoint.z
-                << ") with radius=" << radius << std::endl;
-
+    //DEBUGGING
+    // std::cout << "Neighbors within radius search at ("
+    //                    << searchPoint.x
+    //             << " " << searchPoint.y
+    //             << " " << searchPoint.z
+    //             << ") with radius=" << radius << std::endl;
 
     if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 0 )
     {
-        for (std::size_t i = 0; i < pointIdxRadiusSearch.size (); ++i)
-        std::cout << "    "  <<   cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].x 
-                    << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].y 
-                    << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].z 
-                    << " (squared distance: " << pointRadiusSquaredDistance[i] << ")" << std::endl;
+        // DEBUGGING
+        // for (std::size_t i = 0; i < pointIdxRadiusSearch.size (); ++i)
+        // std::cout   << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].x
+        //             << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].y
+        //             << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].z
+        //             << "    (dist: " << pointRadiusSquaredDistance[i] << ")" << std::endl;
     }
 
 
@@ -425,24 +406,47 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
 
 
+    //////////////////////////////
+    // SELECT FMM INITIAL POINT //
+    //////////////////////////////
+
+    bool fmm_init_pt_safe = 0;
 
     vector<float> fmm_init_pt = {_start_pt(0), _start_pt(1), _start_pt(2)};
     vector<long int> fmm_init_idx = ptVect2idx(fmm_init_pt);
-
-    std::cout << "grid_fmm_3d[fmm_init_idx[3]].isOccupied(): " << grid_fmm_3d[fmm_init_idx[3]].isOccupied() << std::endl;
-    if(grid_fmm_3d[fmm_init_idx[3]].isOccupied())
+    if(grid_fmm_3d[fmm_init_idx[3]].isOccupied() == 0)
     {
-        fmm_init_pt = {_start_pt(0) + _resolution, _start_pt(1), _start_pt(2)};
-        vector<long int> fmm_init_idx = ptVect2idx(fmm_init_pt);
-        std::cout << "grid_fmm_3d[fmm_init_idx[3]].isOccupied() inside if: " << grid_fmm_3d[fmm_init_idx[3]].isOccupied() << std::endl;
+        fmm_init_pt_safe = 1;
     }
+    else
+    {
+        for(int i = 0; i < pointIdxRadiusSearch.size (); i++)
+        {
+            fmm_init_pt = {cloud_fmm_vel->points[pointIdxRadiusSearch[i]].x,
+                           cloud_fmm_vel->points[pointIdxRadiusSearch[i]].y,
+                           cloud_fmm_vel->points[pointIdxRadiusSearch[i]].z};
+            fmm_init_idx = ptVect2idx(fmm_init_pt);
+            if(grid_fmm_3d[fmm_init_idx[3]].isOccupied() == 0)
+            {
+                // std::cout << "FMM INITIAL POINT: " << std::endl;
+                return;
+            }
+        }
+    }
+
+    // // DEBUGGING
+    // std::cout << "grid_fmm_3d[fmm_init_idx[3]].isOccupied(): " << grid_fmm_3d[fmm_init_idx[3]].isOccupied() << std::endl;
 
     vector<unsigned int> startIndices;
     startIndices.push_back(fmm_init_idx[3]);
 
+    ////////////////////////////
+    // FIND FMM ARRIVAL TIMES //
+    ////////////////////////////
 
-
-    std::cout << "start pt occ: " << grid_fmm_3d[fmm_init_idx[3]].getOccupancy() << std::endl;
+    std::cout << "FMM INITIAL POINT: (" << fmm_init_pt[0] << ", " << fmm_init_pt[1] << ", " << fmm_init_pt[2] 
+                                        << ") VELOCITY: " << grid_fmm_3d[fmm_init_idx[3]].getOccupancy() << std::endl;
+    // std::cout << "start pt occ: " << << std::endl;
 
     Solver<FMGrid3D>* fm_solver = new FMMStar<FMGrid3D>("FMM*_Dist", TIME); // LSM, FMM
 
@@ -454,9 +458,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // Preventing memory leaks.
     delete fm_solver;
 
-    ///////////////////
-    // LOCAL FMM PCL //
-    ///////////////////
+    ////////////////////////////////
+    // LOCAL FMM ARRIVAL TIME PCL //
+    ////////////////////////////////
 
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fmm_time (new pcl::PointCloud<pcl::PointXYZI>);
     cloud_fmm_time->height = 1;
@@ -835,7 +839,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     // DEBUGGING
     // std::cout << sqrt(goal_point.point.x*goal_point.point.x + goal_point.point.y*goal_point.point.y + goal_point.point.z*goal_point.point.z) << std::endl;
-    std::cout << "goal_point.point: " << goal_point.point.x << ", " << goal_point.point.y << ", " << goal_point.point.z << std::endl;
+    std::cout << "GOAL POINT: " << goal_point.point.x << ", " << goal_point.point.y << ", " << goal_point.point.z << std::endl;
     
 
     // DEBUGGING
