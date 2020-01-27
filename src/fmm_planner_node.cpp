@@ -599,7 +599,12 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     // Find xyz coordinate of robot point (from FMM map)
     Vector3d robot_pt = xyz2ptVect(robot_xyz_idx);
-    
+
+    geometry_msgs::PointStamped goal_point_uncropped;
+    geometry_msgs::PoseStamped goal_pose_uncropped;
+    geometry_msgs::PointStamped goal_point;
+    geometry_msgs::PoseStamped goal_pose;
+
     for(int path_idx = 0; path_idx < int(path_coord.size()); path_idx++)
     {
         // Find xyz coordinate of path point[path_idx]
@@ -713,14 +718,12 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             }
         }
         
-        geometry_msgs::PointStamped goal_point_uncropped;
         goal_point_uncropped.header.stamp = ros::Time::now();
         goal_point_uncropped.header.frame_id = "odom";
         goal_point_uncropped.point.x = goal_pt(0);
         goal_point_uncropped.point.y = goal_pt(1);
         goal_point_uncropped.point.z = goal_pt(2);
             
-        geometry_msgs::PoseStamped goal_pose_uncropped;
         goal_pose_uncropped.header.stamp = ros::Time::now();
         goal_pose_uncropped.header.frame_id = "odom";
         goal_pose_uncropped.pose.position.x = goal_pt(0);
@@ -735,14 +738,12 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                                              + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
                                              + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
 
-        geometry_msgs::PointStamped goal_point;
         goal_point.header.stamp = ros::Time::now();
         goal_point.header.frame_id = "odom";
         goal_point.point.x = robot_pt(0) + (goal_pt(0) - robot_pt(0)) * _look_ahead_distance / goal_point_uncropped_dist;
         goal_point.point.y = robot_pt(1) + (goal_pt(1) - robot_pt(1)) * _look_ahead_distance / goal_point_uncropped_dist;
         goal_point.point.z = robot_pt(2) + (goal_pt(2) - robot_pt(2)) * _look_ahead_distance / goal_point_uncropped_dist;
             
-        geometry_msgs::PoseStamped goal_pose;
         goal_pose.header.stamp = ros::Time::now();
         goal_pose.header.frame_id = "odom";
         goal_pose.pose.position.x = robot_pt(0) + (goal_pt(0) - robot_pt(0)) * _look_ahead_distance / goal_point_uncropped_dist;
@@ -753,18 +754,25 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         goal_pose.pose.orientation.z = 0.0;
         goal_pose.pose.orientation.w = 1.0;
 
-        std::cout << sqrt(goal_point.point.x*goal_point.point.x + goal_point.point.y*goal_point.point.y + goal_point.point.z*goal_point.point.z) << std::endl;
         
-        _goal_point_uncropped_pub.publish(goal_point_uncropped);
-        _goal_pose_uncropped_pub.publish(goal_pose_uncropped);
-        _goal_point_pub.publish(goal_point);
-        _goal_pose_pub.publish(goal_pose);
-
-        // _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
-        // _collision_vector_vis_pub.publish(collision_vectors_msg);
     }
     std::cout << std::endl;
     std::cout << std::endl;
+
+    _goal_point_uncropped_pub.publish(goal_point_uncropped);
+    _goal_pose_uncropped_pub.publish(goal_pose_uncropped);
+    _goal_point_pub.publish(goal_point);
+    _goal_pose_pub.publish(goal_pose);
+
+    // DEBUGGING
+    // std::cout << sqrt(goal_point.point.x*goal_point.point.x + goal_point.point.y*goal_point.point.y + goal_point.point.z*goal_point.point.z) << std::endl;
+    std::cout << "goal_point.point: " << goal_point.point.x << ", " << goal_point.point.y << ", " << goal_point.point.z << std::endl;
+    std::cout << std::endl;
+
+    // DEBUGGING
+    // _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
+    // _collision_vector_vis_pub.publish(collision_vectors_msg);
+
 }
 
 void publishVisPath(vector<Vector3d> path, ros::Publisher _path_vis_pub)
