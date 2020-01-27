@@ -670,7 +670,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                                   0.5 * _resolution + _start_pt(1) - _start_pt_rounding_eror(1),
                                   0.5 * _resolution + _start_pt(2) - _start_pt_rounding_eror(2)};
                                     
-    // Find xyz indeces of robot point in FMM map
+    // Find xyz indices of robot point in FMM map
     vector<long int> robot_pt_idx = ptVect2idx(robot_pt_xyz);
     vector<int> robot_xyz_idx = {robot_pt_idx[0], robot_pt_idx[1], robot_pt_idx[2]};
 
@@ -811,21 +811,38 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         goal_pose_uncropped.pose.orientation.z = 0.0;
         goal_pose_uncropped.pose.orientation.w = 1.0;
 
+
         float goal_point_uncropped_dist = sqrt((goal_pt(0) - robot_pt(0)) * (goal_pt(0) - robot_pt(0))
                                              + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
                                              + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
 
+        std::cout << "uncropped distance" << goal_point_uncropped_dist << std::endl;
+
+        if(goal_point_uncropped_dist > 1)
+        {
+            goal_pt(0) = robot_pt(0) + (goal_pt(0) - robot_pt(0)) * _look_ahead_distance / goal_point_uncropped_dist;
+            goal_pt(1) = robot_pt(1) + (goal_pt(1) - robot_pt(1)) * _look_ahead_distance / goal_point_uncropped_dist;
+            goal_pt(2) = robot_pt(2) + (goal_pt(2) - robot_pt(2)) * _look_ahead_distance / goal_point_uncropped_dist;
+        }
+
+
+        float goal_point_cropped_dist = sqrt((goal_pt(0) - robot_pt(0)) * (goal_pt(0) - robot_pt(0))
+                                             + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
+                                             + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
+
+        std::cout << "cropped distance" << goal_point_cropped_dist << std::endl;
+
         goal_point.header.stamp = ros::Time::now();
         goal_point.header.frame_id = "odom";
-        goal_point.point.x = robot_pt(0) + (goal_pt(0) - robot_pt(0)) * _look_ahead_distance / goal_point_uncropped_dist;
-        goal_point.point.y = robot_pt(1) + (goal_pt(1) - robot_pt(1)) * _look_ahead_distance / goal_point_uncropped_dist;
-        goal_point.point.z = robot_pt(2) + (goal_pt(2) - robot_pt(2)) * _look_ahead_distance / goal_point_uncropped_dist;
+        goal_point.point.x = goal_pt(0);
+        goal_point.point.y = goal_pt(1);
+        goal_point.point.z = goal_pt(2);
             
         goal_pose.header.stamp = ros::Time::now();
         goal_pose.header.frame_id = "odom";
-        goal_pose.pose.position.x = robot_pt(0) + (goal_pt(0) - robot_pt(0)) * _look_ahead_distance / goal_point_uncropped_dist;
-        goal_pose.pose.position.y = robot_pt(1) + (goal_pt(1) - robot_pt(1)) * _look_ahead_distance / goal_point_uncropped_dist;
-        goal_pose.pose.position.z = robot_pt(2) + (goal_pt(2) - robot_pt(2)) * _look_ahead_distance / goal_point_uncropped_dist;
+        goal_pose.pose.position.x = goal_pt(0);
+        goal_pose.pose.position.y = goal_pt(1);
+        goal_pose.pose.position.z = goal_pt(2);
         goal_pose.pose.orientation.x = 0.0;
         goal_pose.pose.orientation.y = 0.0;
         goal_pose.pose.orientation.z = 0.0;
@@ -841,8 +858,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // std::cout << sqrt(goal_point.point.x*goal_point.point.x + goal_point.point.y*goal_point.point.y + goal_point.point.z*goal_point.point.z) << std::endl;
     std::cout << "GOAL POINT: " << goal_point.point.x << ", " << goal_point.point.y << ", " << goal_point.point.z << std::endl;
     
-
-    // DEBUGGING
     // _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
     // _collision_vector_vis_pub.publish(collision_vectors_msg);
 
@@ -854,7 +869,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     std::cout << std::endl;
     std::cout << std::endl;
     std::cout << std::endl;
-
 }
 
 void publishVisPath(vector<Vector3d> path, ros::Publisher _path_vis_pub)
