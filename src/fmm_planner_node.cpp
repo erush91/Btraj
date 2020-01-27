@@ -272,9 +272,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // DEBUGGING
     // std::cout << "_start_pt: " << _start_pt(0) << ", " << _start_pt(1) << ", " << _start_pt(2) << std::endl;
     
-    ////////////////////
-    // LOCAL ESDF MAP //
-    ////////////////////
+    //////////////////////////////
+    // LOCAL ESDF MAP (DISTANCE //
+    //////////////////////////////
     
     Coord3D dimsize {x_size, y_size, z_size};
     FMGrid3D grid_fmm_3d(dimsize);
@@ -324,15 +324,13 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // LOCAL FMM MAP (ARRIVAL TIME) //
     //////////////////////////////////
 
-    Vector3d endIdx3d = - _map_origin * _inv_resolution;
-
-    Coord3D init_point = {(unsigned int)round(endIdx3d[0]), (unsigned int)round(endIdx3d[1]), (unsigned int)round(endIdx3d[2])};
-
-    unsigned int startIdx;
+    
+    vector<float> fmm_init_pt = {_start_pt(0), _start_pt(1), _start_pt(2)};
+    vector<long int> fmm_init_idx = ptVect2idx(fmm_init_pt);
     vector<unsigned int> startIndices;
-    grid_fmm_3d.coord2idx(init_point, startIdx);
+    startIndices.push_back(fmm_init_idx[3]);
 
-    startIndices.push_back(startIdx);
+    std::cout << "start pt occ: " << grid_fmm_3d[fmm_init_idx[3]].getOccupancy() << std::endl;
 
     Solver<FMGrid3D>* fm_solver = new FMMStar<FMGrid3D>("FMM*_Dist", TIME); // LSM, FMM
 
@@ -406,10 +404,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     pcl::toROSMsg(cloud_fmm_time, timeMap);
     _map_fmm_time_vis_pub.publish(timeMap);
 
-
-
-
-
     //////////////////////
     // LOCAL REWARD PCL //
     //////////////////////
@@ -462,9 +456,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     std::cout << "min_idx: " << min_idx << std::endl;
 
-    ////////////////////////////////////
-    // GOAL POINT SELECTION (TESITNG) //
-    ////////////////////////////////////
+    //////////////////////////
+    // GOAL POINT SELECTION //
+    //////////////////////////
 
 
     pcl::PointXYZI fmm_max_reward_pt;
@@ -512,23 +506,20 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     }
     fmm_max_reward_idx = pt2idx(fmm_max_reward_pt);
 
-
-    
-
-
     /////////////////////////////
     // LOCAL PATH (FMM SOLVER) //
     /////////////////////////////
-    Vector3d start_offset = {0.0, 0.0, 0.0};
-    Vector3d startIdx3d = (start_offset - _map_origin) * _inv_resolution;
-    Coord3D end_point = {(unsigned int)round(startIdx3d[0]), (unsigned int)round(startIdx3d[1]), (unsigned int)round(startIdx3d[2])};
-    unsigned int goalIdx;
-    grid_fmm_3d.coord2idx(end_point, goalIdx);
+
+    // DEBUGGING: FIXED GOAL POINT TESTING
+    // Vector3d start_offset = {0.0, 0.0, 0.0};
+    // Vector3d startIdx3d = (start_offset - _map_origin) * _inv_resolution;
+    // Coord3D end_point = {(unsigned int)round(startIdx3d[0]), (unsigned int)round(startIdx3d[1]), (unsigned int)round(startIdx3d[2])};
+    // unsigned int goalIdx;
+    // grid_fmm_3d.coord2idx(end_point, goalIdx);
 
     Path3D path3D;
     vector<double> path_vels, time;
     GradientDescent< FMGrid3D > grad3D;
-    grid_fmm_3d.coord2idx(end_point, goalIdx);
 
     vector<Vector3d> path_coord;
     int cnt2 = 0;
@@ -753,11 +744,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         goal_pose.pose.orientation.y = 0.0;
         goal_pose.pose.orientation.z = 0.0;
         goal_pose.pose.orientation.w = 1.0;
-
-        
     }
-    std::cout << std::endl;
-    std::cout << std::endl;
 
     _goal_point_uncropped_pub.publish(goal_point_uncropped);
     _goal_pose_uncropped_pub.publish(goal_pose_uncropped);
@@ -767,6 +754,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // DEBUGGING
     // std::cout << sqrt(goal_point.point.x*goal_point.point.x + goal_point.point.y*goal_point.point.y + goal_point.point.z*goal_point.point.z) << std::endl;
     std::cout << "goal_point.point: " << goal_point.point.x << ", " << goal_point.point.y << ", " << goal_point.point.z << std::endl;
+    
+    std::cout << std::endl;
+    std::cout << std::endl;
     std::cout << std::endl;
 
     // DEBUGGING
