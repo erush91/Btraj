@@ -6,6 +6,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/kdtree/kdtree_flann.h> // For K-nearest neighbor search
 
 #include <ros/ros.h>
 #include <ros/console.h>
@@ -324,10 +325,10 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // LOCAL ESDF PCL //
     ////////////////////
 
-    pcl::PointCloud<pcl::PointXYZI> cloud_fmm_vel;
-    cloud_fmm_vel.height = 1;
-    cloud_fmm_vel.is_dense = true;
-    cloud_fmm_vel.header.frame_id = "odom";
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fmm_vel (new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_fmm_vel->height = 1;
+    cloud_fmm_vel->is_dense = true;
+    cloud_fmm_vel->header.frame_id = "odom";
 
     long int cnt = 0;
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
@@ -337,24 +338,80 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         if(fmm_vel_pt.intensity > 0)
         {
             cnt++;
-            cloud_fmm_vel.push_back(fmm_vel_pt);
+            cloud_fmm_vel->push_back(fmm_vel_pt);
         }
     }
 
-    cloud_fmm_vel.width = cnt;
+    cloud_fmm_vel->width = cnt;
 
     // DEBUGGING
     // std::cout << "cloud_fmm_vel cnt: " << cnt << std::endl;
     // std::cout << "cloud_fmm_vel.points.size: " << cloud_fmm_vel.points.size() << std::endl;
 
     sensor_msgs::PointCloud2 velMap;
-    pcl::toROSMsg(cloud_fmm_vel, velMap);
+    pcl::toROSMsg(*cloud_fmm_vel, velMap);
     _map_fmm_vel_vis_pub.publish(velMap);
 
     //////////////////////////////////
     // LOCAL FMM MAP (ARRIVAL TIME) //
     //////////////////////////////////
-    
+
+//   pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtree (new pcl::KdTreeFLANN<pcl::PointXYZI>);
+//   kdtree->setInputCloud(&cloud_fmm_vel);
+
+//   pcl::PointXYZ searchPoint;
+
+//   searchPoint.x = _start_pt(0);
+//   searchPoint.y = _start_pt(1);
+//   searchPoint.z = _start_pt(2);
+
+//   // K nearest neighbor search
+
+//   int K = 10;
+
+//   std::vector<int> pointIdxNKNSearch(K);
+//   std::vector<float> pointNKNSquaredDistance(K);
+
+//   std::cout << "K nearest neighbor search at (" << searchPoint.x 
+//             << " " << searchPoint.y 
+//             << " " << searchPoint.z
+//             << ") with K=" << K << std::endl;
+
+//   if ( kdtree.nearestKSearch (searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 )
+//   {
+//     for (std::size_t i = 0; i < pointIdxNKNSearch.size (); ++i)
+//       std::cout << "    "  <<   cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].x 
+//                 << " " << cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].y 
+//                 << " " << cloud_fmm_vel->points[ pointIdxNKNSearch[i] ].z 
+//                 << " (squared distance: " << pointNKNSquaredDistance[i] << ")" << std::endl;
+//   }
+
+  // Neighbors within radius search
+
+//   std::vector<int> pointIdxRadiusSearch;
+//   std::vector<float> pointRadiusSquaredDistance;
+
+//   float radius = 1.0;
+
+//   std::cout << "Neighbors within radius search at (" << searchPoint.x 
+//             << " " << searchPoint.y 
+//             << " " << searchPoint.z
+//             << ") with radius=" << radius << std::endl;
+
+
+//   if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 0 )
+//   {
+//     for (std::size_t i = 0; i < pointIdxRadiusSearch.size (); ++i)
+//       std::cout << "    "  <<   cloud->points[ pointIdxRadiusSearch[i] ].x 
+//                 << " " << cloud->points[ pointIdxRadiusSearch[i] ].y 
+//                 << " " << cloud->points[ pointIdxRadiusSearch[i] ].z 
+//                 << " (squared distance: " << pointRadiusSquaredDistance[i] << ")" << std::endl;
+//   }
+
+
+
+
+
     vector<float> fmm_init_pt = {_start_pt(0), _start_pt(1), _start_pt(2)};
     vector<long int> fmm_init_idx = ptVect2idx(fmm_init_pt);
 
@@ -387,10 +444,10 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // LOCAL FMM PCL //
     ///////////////////
 
-    pcl::PointCloud<pcl::PointXYZI> cloud_fmm_time;
-    cloud_fmm_time.height = 1;
-    cloud_fmm_time.is_dense = true;
-    cloud_fmm_time.header.frame_id = "odom";
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fmm_time (new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_fmm_time->height = 1;
+    cloud_fmm_time->is_dense = true;
+    cloud_fmm_time->header.frame_id = "odom";
 
     cnt = 0;
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
@@ -400,28 +457,28 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         if(fmm_time_pt.intensity > 0 && fmm_time_pt.intensity < 99999)
         {
             cnt++;
-            cloud_fmm_time.push_back(fmm_time_pt);
+            cloud_fmm_time->push_back(fmm_time_pt);
         }
     }
 
-    cloud_fmm_time.width = cnt;
+    cloud_fmm_time->width = cnt;
 
     // DEBUGGING
     // std::cout << "cloud_fmm_time cnt: " << cnt << std::endl;
     // std::cout << "cloud_fmm_time.points.size: " << cloud_fmm_time.points.size() << std::endl;
 
     sensor_msgs::PointCloud2 timeMap;
-    pcl::toROSMsg(cloud_fmm_time, timeMap);
+    pcl::toROSMsg(*cloud_fmm_time, timeMap);
     _map_fmm_time_vis_pub.publish(timeMap);
 
     //////////////////////
     // LOCAL REWARD PCL //
     //////////////////////
 
-    pcl::PointCloud<pcl::PointXYZI> cloud_fmm_reward;
-    cloud_fmm_reward.height = 1;
-    cloud_fmm_reward.is_dense = true;
-    cloud_fmm_reward.header.frame_id = "odom";
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fmm_reward (new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_fmm_reward->height = 1;
+    cloud_fmm_reward->is_dense = true;
+    cloud_fmm_reward->header.frame_id = "odom";
 
     float reward;
     cnt = 0;
@@ -441,7 +498,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         if(grid_fmm_3d[grid_idx].getArrivalTime() > 0 && grid_fmm_3d[grid_idx].getArrivalTime() < 99999)
         {
             cnt++;
-            cloud_fmm_reward.push_back(fmm_reward_pt);
+            cloud_fmm_reward->push_back(fmm_reward_pt);
 
             // Find point farthest away
             if (reward < min_dist)
@@ -454,14 +511,14 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
 
     }
-    cloud_fmm_reward.width = cnt;
+    cloud_fmm_reward->width = cnt;
 
     // DEBUGGING
     // std::cout << "cloud_fmm_reward cnt: " << cnt << std::endl;
     // std::cout << "cloud_fmm_reward.points.size: " << cloud_fmm_time.points.size() << std::endl;
 
     sensor_msgs::PointCloud2 rewardMap;
-    pcl::toROSMsg(cloud_fmm_reward, rewardMap);
+    pcl::toROSMsg(*cloud_fmm_reward, rewardMap);
     _map_fmm_reward_vis_pub.publish(rewardMap);
 
     std::cout << "min_idx: " << min_idx << std::endl;
@@ -474,9 +531,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     pcl::PointXYZI fmm_max_reward_pt;
     vector<long int> fmm_max_reward_idx;
 
-    if(cloud_fmm_reward.width > 0)
+    if(cloud_fmm_reward->width > 0)
     {
-        fmm_max_reward_pt = cloud_fmm_reward.points[min_idx];
+        fmm_max_reward_pt = cloud_fmm_reward->points[min_idx];
                                   
         // DEBUGGING
         // std::cout << "inside if: cloud_fmm_reward.width: " << cloud_fmm_reward.width << std::endl;
