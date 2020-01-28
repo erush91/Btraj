@@ -626,17 +626,30 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     float reward;
     cnt = 0;
-    long int min_idx = 0;
-    float min_dist = 10.0;
+    long int max_idx = 0;
+    float max_dist = 0.0;
+
+    float distance_to_explored_pt;
+    float min_distance_to_all_explored_pts;
 
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
-        // Compute distance to desired point
+        min_distance_to_all_explored_pts = 10.0;
+
         pcl::PointXYZI reward_pt = idx2pt(grid_idx);
-        reward = sqrt((reward_pt.x - _desired_pt(0))*(reward_pt.x - _desired_pt(0))
-                    + (reward_pt.y - _desired_pt(1))*(reward_pt.y - _desired_pt(1))); // DISTANCE FROM GOAL POINT IN FRONT OF ROBOT
-                    
-        reward_pt.intensity = reward;
+
+        for (int i = 0; i < cloud_explored->points.size(); i++)
+        {
+            pcl::PointXYZI explored_pt = cloud_explored->points[i];
+
+            // Compute distance to nearest explored point
+            distance_to_explored_pt = pcl::geometry::distance(reward_pt, explored_pt);
+            if (distance_to_explored_pt < min_distance_to_all_explored_pts)
+            {
+                min_distance_to_all_explored_pts = distance_to_explored_pt;
+            }
+        }
+        reward_pt.intensity = min_distance_to_all_explored_pts;
 
         // Push traversable points to pcl
         if(grid_fmm_3d[grid_idx].getArrivalTime() > 0 && grid_fmm_3d[grid_idx].getArrivalTime() < 99999)
@@ -645,10 +658,10 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             cloud_reward->push_back(reward_pt);
 
             // Find point farthest away
-            if (reward < min_dist)
+            if (min_distance_to_all_explored_pts > max_dist)
             {
-                min_idx = cnt - 1;
-                min_dist = reward;
+                max_idx = cnt - 1;
+                max_dist = min_distance_to_all_explored_pts;
             }
         }
     }
@@ -658,7 +671,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // REMOVE EXPLORED POINTS //
     ////////////////////////////
 
-
     pcl::KdTreeFLANN<pcl::PointXYZI> kdtree_reward;
     
     std::vector<int> explored_pointIdxRadiusSearch;
@@ -666,12 +678,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     if(cloud_reward->points.size() > 0 && cloud_explored->points.size() > 0)
     {
-        
-
         for (int i = 0; i < cloud_explored->points.size(); i++)
         {
-
-        kdtree_reward.setInputCloud (cloud_reward);
+            kdtree_reward.setInputCloud (cloud_reward);
 
             pcl::PointXYZI explored_pt;
             explored_pt.x = cloud_explored->points[i].x;
@@ -681,31 +690,20 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
             if ( kdtree_reward.radiusSearch(explored_pt, (float)_exploration_seen_radius, explored_pointIdxRadiusSearch, explored_pointRadiusSquaredDistance) > 0 )
             {
-
                 sort(explored_pointIdxRadiusSearch.begin(), explored_pointIdxRadiusSearch.end(), greater<int>()); 
-                      
-                std::cout << "explored_pointIdxRadiusSearch.size(): " << explored_pointIdxRadiusSearch.size() << std::endl;
+
+                // DEBUGGING                    
+                // std::cout << "explored_pointIdxRadiusSearch.size(): " << explored_pointIdxRadiusSearch.size() << std::endl;
 
                 for (size_t i = 0; i < explored_pointIdxRadiusSearch.size (); ++i)
                 {
                     cloud_reward->erase(cloud_reward->begin() + explored_pointIdxRadiusSearch[i]);
                 }
-
             }
-
             explored_pointIdxRadiusSearch.clear();
             explored_pointRadiusSquaredDistance.clear();
-
-
-            
         }
-
-        // cloud_explored->erase(0);
-
-
     }
-
-
 
     // DEBUGGING
     // std::cout << "cloud_reward cnt: " << cnt << std::endl;
@@ -716,7 +714,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     _map_reward_vis_pub.publish(rewardMap);
 
     // DEBUGGING
-    // std::cout << "min_idx: " << min_idx << std::endl;
+    // std::cout << "max_idx: " << max_idx << std::endl;
 
     //////////////////////////
     // GOAL POINT SELECTION //
@@ -727,16 +725,16 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     if(cloud_reward->width > 0)
     {
-        max_reward_pt = cloud_reward->points[min_idx];
+        max_reward_pt = cloud_reward->points[max_idx];
                                   
         // DEBUGGING
         // std::cout << "inside if: cloud_reward.width: " << cloud_reward.width << std::endl;
-        // std::cout << "inside if: min_idx: " << min_idx << std::endl;
-        // std::cout << "inside if: min_dist: " << min_dist << std::endl;
-        // std::cout << "inside if: cloud_reward.points[min_idx].x: " << cloud_reward.points[min_idx].x << std::endl;
-        // std::cout << "inside if: cloud_reward.points[min_idx].x: " << cloud_reward.points[min_idx].x << std::endl;
-        // std::cout << "inside if: cloud_reward.points[min_idx].y: " << cloud_reward.points[min_idx].y << std::endl;
-        // std::cout << "inside if: cloud_reward.points[min_idx].z: " << cloud_reward.points[min_idx].z << std::endl;
+        // std::cout << "inside if: max_idx: " << max_idx << std::endl;
+        // std::cout << "inside if: max_dist: " << max_dist << std::endl;
+        // std::cout << "inside if: cloud_reward.points[max_idx].x: " << cloud_reward.points[max_idx].x << std::endl;
+        // std::cout << "inside if: cloud_reward.points[max_idx].x: " << cloud_reward.points[max_idx].x << std::endl;
+        // std::cout << "inside if: cloud_reward.points[max_idx].y: " << cloud_reward.points[max_idx].y << std::endl;
+        // std::cout << "inside if: cloud_reward.points[max_idx].z: " << cloud_reward.points[max_idx].z << std::endl;
 
         geometry_msgs::PointStamped max_reward_point;
         max_reward_point.header.stamp = ros::Time::now();
