@@ -14,6 +14,7 @@
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/PoseArray.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <visualization_msgs/Marker.h>
 
@@ -75,11 +76,15 @@ unsigned long int _max_grid_idx;
 int x_size, y_size, z_size;
 
 // ROS
-ros::Subscriber _map_sub, _pts_sub, _odom_sub;
+ros::Subscriber _map_sub;
+ros::Subscriber _odom_sub; 
+ros::Subscriber _pose_graph_sub;
+
 ros::Publisher _fm_path_vis_pub;
 ros::Publisher _map_fmm_vel_vis_pub;
 ros::Publisher _map_fmm_time_vis_pub;
 ros::Publisher _map_fmm_reward_vis_pub;
+ros::Publisher _map_pose_vis_pub;
 ros::Publisher _line_of_sight_path_vis_pub;
 ros::Publisher _line_of_sight_vector_vis_pub;
 ros::Publisher _collision_vector_vis_pub;
@@ -94,6 +99,7 @@ visualization_msgs::MarkerArray line_of_sight_vectors_msg;
     
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map);
 void rcvOdometryCallbck(const nav_msgs::Odometry odom);
+void rcvPoseGraphCallbck(const geometry_msgs::PoseArray pose_graph);
 void publishVisPath(vector<Vector3d> path, ros::Publisher _path_vis_pub);
 double velMapping(double d);
 
@@ -110,12 +116,14 @@ int main(int argc, char** argv)
     ros::init(argc, argv, "b_traj_node");
     ros::NodeHandle nh("~");
 
-    _map_sub  = nh.subscribe( "map",       1, rcvPointCloudCallBack );
-    _odom_sub = nh.subscribe( "odometry",  1, rcvOdometryCallbck);
+    _map_sub            = nh.subscribe("map",        1, rcvPointCloudCallBack);
+    _odom_sub           = nh.subscribe("odometry",   1, rcvOdometryCallbck);
+    _pose_graph_sub     = nh.subscribe("pose_array", 1, rcvPoseGraphCallbck);
 
     _map_fmm_vel_vis_pub            = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/velocity", 1);
     _map_fmm_time_vis_pub           = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/arrival_time", 1);
     _map_fmm_reward_vis_pub         = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/reward", 1);
+    _map_pose_vis_pub               = nh.advertise<sensor_msgs::PointCloud2>("viz/map/pose", 1);
     _fm_path_vis_pub                = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/fmm_path", 1);
     _line_of_sight_path_vis_pub     = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/line_of_sight_path", 1);
     _line_of_sight_vector_vis_pub   = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/line_of_sight/vectors", 1);
@@ -161,39 +169,6 @@ int main(int argc, char** argv)
     return 0;
 }
 
-void rcvOdometryCallbck(const nav_msgs::Odometry odom)
-{
-    _odom = odom;
-    _has_odom = true;
-
-    _odom_start_pt(0)  = _odom.pose.pose.position.x;
-    _odom_start_pt(1)  = _odom.pose.pose.position.y;
-    _odom_start_pt(2)  = _odom.pose.pose.position.z;
-
-    _odom_start_pt_rounding_eror(0) = ((_odom_start_pt(0) * _inv_resolution) - round(_odom_start_pt(0) * _inv_resolution)) * _resolution;
-    _odom_start_pt_rounding_eror(1) = ((_odom_start_pt(1) * _inv_resolution) - round(_odom_start_pt(1) * _inv_resolution)) * _resolution;
-    _odom_start_pt_rounding_eror(2) = ((_odom_start_pt(2) * _inv_resolution) - round(_odom_start_pt(2) * _inv_resolution)) * _resolution;
-
-    tf::Quaternion quat(_odom.pose.pose.orientation.x,
-                        _odom.pose.pose.orientation.y,
-                        _odom.pose.pose.orientation.z,
-                        _odom.pose.pose.orientation.w);
-        
-    tf::Matrix3x3 m_odom(quat);
-    double roll, pitch, yaw;
-    m_odom.getRPY(roll, pitch, yaw);
-
-    // DEBUGGING
-    // std::cout << "yaw: " << yaw << std::endl;
-    
-    _odom_desired_pt(0)  = _odom_start_pt(0) + 5*cos(-yaw);
-    _odom_desired_pt(1)  = _odom_start_pt(1) - 5*sin(-yaw);
-    _odom_desired_pt(2)  = _odom_start_pt(2);
-
-
-    // DEBUGGING
-    // std::cout << "_start_pt_rounding_eror" << _start_pt_rounding_eror(0) << ", " << _start_pt_rounding_eror(1) << ", " << _start_pt_rounding_eror(2) << std::endl;
-}
 vector<long int> pt2idx(pcl::PointXYZI pt)
 {
     long int  x_idx = ((pt.x - _start_pt(0) - _map_origin(0)) * _inv_resolution);
@@ -268,15 +243,81 @@ Vector3d xyz2ptVect(vector<int> xyz_idx)
     return pt;
 }
 
+void rcvOdometryCallbck(const nav_msgs::Odometry odom)
+{
+    _odom = odom;
+    _has_odom = true;
+
+    _odom_start_pt(0)  = _odom.pose.pose.position.x;
+    _odom_start_pt(1)  = _odom.pose.pose.position.y;
+    _odom_start_pt(2)  = _odom.pose.pose.position.z;
+
+    _odom_start_pt_rounding_eror(0) = ((_odom_start_pt(0) * _inv_resolution) - round(_odom_start_pt(0) * _inv_resolution)) * _resolution;
+    _odom_start_pt_rounding_eror(1) = ((_odom_start_pt(1) * _inv_resolution) - round(_odom_start_pt(1) * _inv_resolution)) * _resolution;
+    _odom_start_pt_rounding_eror(2) = ((_odom_start_pt(2) * _inv_resolution) - round(_odom_start_pt(2) * _inv_resolution)) * _resolution;
+
+    tf::Quaternion quat(_odom.pose.pose.orientation.x,
+                        _odom.pose.pose.orientation.y,
+                        _odom.pose.pose.orientation.z,
+                        _odom.pose.pose.orientation.w);
+        
+    tf::Matrix3x3 m_odom(quat);
+    double roll, pitch, yaw;
+    m_odom.getRPY(roll, pitch, yaw);
+
+    // DEBUGGING
+    // std::cout << "yaw: " << yaw << std::endl;
+    
+    _odom_desired_pt(0)  = _odom_start_pt(0) + 5*cos(-yaw);
+    _odom_desired_pt(1)  = _odom_start_pt(1) - 5*sin(-yaw);
+    _odom_desired_pt(2)  = _odom_start_pt(2);
+
+
+    // DEBUGGING
+    // std::cout << "_start_pt_rounding_eror" << _start_pt_rounding_eror(0) << ", " << _start_pt_rounding_eror(1) << ", " << _start_pt_rounding_eror(2) << std::endl;
+}
+
+void rcvPoseGraphCallbck(const geometry_msgs::PoseArray pose_graph_msg)
+{
+    // Record start time
+    auto start = std::chrono::high_resolution_clock::now();
+
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_pose_graph (new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_pose_graph->height = 1;
+    cloud_pose_graph->is_dense = true;
+    cloud_pose_graph->header.frame_id = "map";
+
+    for(int i = 0; i < pose_graph_msg.poses.size(); i++)
+    {
+        pcl::PointXYZI pose_graph_pt;
+        pose_graph_pt.x = pose_graph_msg.poses[i].position.x;
+        pose_graph_pt.y = pose_graph_msg.poses[i].position.y;
+        pose_graph_pt.z = pose_graph_msg.poses[i].position.z;
+        pose_graph_pt.intensity = 0;
+        cloud_pose_graph->push_back(pose_graph_pt);
+    }
+
+    cloud_pose_graph->width = pose_graph_msg.poses.size();
+
+    std::cout << "cloud_pose_graph.points.size: " << cloud_pose_graph->points.size() << std::endl;
+
+    sensor_msgs::PointCloud2 poseMap;
+    pcl::toROSMsg(*cloud_pose_graph, poseMap);
+    _map_pose_vis_pub.publish(poseMap);
+
+    // Record end time
+    auto finish = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = finish - start;
+    std::cout << "Elapsed time: " << elapsed.count() << " s\n";
+}
+
+
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 {
 
     _start_pt               = _odom_start_pt;
     _start_pt_rounding_eror = _odom_start_pt_rounding_eror;
     _desired_pt             = _odom_desired_pt;
-
-    // Record start time
-    auto start = std::chrono::high_resolution_clock::now();
 
     pcl::PointCloud<pcl::PointXYZI> cloud;  
     pcl::fromROSMsg(pointcloud_map, cloud);
@@ -455,7 +496,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // COMPUTE FMM ARRIVAL TIMES //
     ///////////////////////////////
 
-    std::cout << "FMM INITIAL POINT: (" << fmm_init_pt[0] << ", " << fmm_init_pt[1] << ", " << fmm_init_pt[2] 
+    std::cout << "FMM INITIAL POINT: (" << fmm_init_pt[0] << ", " << fmm_init_pt[1] << ", " << fmm_init_pt[2]
                                         << ") VELOCITY: " << grid_fmm_3d[fmm_init_idx[3]].getOccupancy() << std::endl;
     // std::cout << "start pt occ: " << << std::endl;
 
@@ -519,7 +560,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         // Compute distance to desired point
         pcl::PointXYZI fmm_reward_pt = idx2pt(grid_idx);
         reward = sqrt((fmm_reward_pt.x - _desired_pt(0))*(fmm_reward_pt.x - _desired_pt(0))
-                    + (fmm_reward_pt.y - _desired_pt(1))*(fmm_reward_pt.y - _desired_pt(1))); // DISTANCE FROM GOAL POINT IN FRONHT OF ROBOT
+                    + (fmm_reward_pt.y - _desired_pt(1))*(fmm_reward_pt.y - _desired_pt(1))); // DISTANCE FROM GOAL POINT IN FRONT OF ROBOT
                     
         fmm_reward_pt.intensity = reward;
 
@@ -556,7 +597,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     //////////////////////////
     // GOAL POINT SELECTION //
     //////////////////////////
-
 
     pcl::PointXYZI fmm_max_reward_pt;
     vector<long int> fmm_max_reward_idx;
@@ -878,13 +918,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // std::cout << sqrt(goal_point.point.x*goal_point.point.x + goal_point.point.y*goal_point.point.y + goal_point.point.z*goal_point.point.z) << std::endl;
     std::cout << "GOAL POINT: " << goal_point.point.x << ", " << goal_point.point.y << ", " << goal_point.point.z << std::endl;
     
-    _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
-    _collision_vector_vis_pub.publish(collision_vectors_msg);
-
-    // Record end time
-    auto finish = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = finish - start;
-    std::cout << "Elapsed time: " << elapsed.count() << " s\n";
+    // _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
+    // _collision_vector_vis_pub.publish(collision_vectors_msg);
 
     std::cout << std::endl;
     std::cout << std::endl;
