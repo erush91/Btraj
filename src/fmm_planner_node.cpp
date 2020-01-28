@@ -66,9 +66,15 @@ bool _has_traj  = false;
 Vector3d _start_pt;
 Vector3d _start_pt_rounding_eror;
 Vector3d _desired_pt;
+float _roll;
+float _pitch;
+float _yaw;
 Vector3d _odom_start_pt;
 Vector3d _odom_start_pt_rounding_eror;
 Vector3d _odom_desired_pt;
+float _odom_roll;
+float _odom_pitch;
+float _odom_yaw;
 Vector3d max_reward_pt;
 Vector3d _map_origin;
 double _x_size, _y_size, _z_size;
@@ -273,14 +279,14 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
                         _odom.pose.pose.orientation.w);
         
     tf::Matrix3x3 m_odom(quat);
-    double roll, pitch, yaw;
-    m_odom.getRPY(roll, pitch, yaw);
+    double _odom_roll, _odom_pitch, _odom_yaw;
+    m_odom.getRPY(_odom_roll, _odom_pitch, _odom_yaw);
 
     // DEBUGGING
-    // std::cout << "yaw: " << yaw << std::endl;
+    // std::cout << "_odom_yaw: " << _odom_yaw << std::endl;
     
-    _odom_desired_pt(0)  = _odom_start_pt(0) + 5*cos(-yaw);
-    _odom_desired_pt(1)  = _odom_start_pt(1) - 5*sin(-yaw);
+    _odom_desired_pt(0)  = _odom_start_pt(0) + 5*cos(-_odom_yaw);
+    _odom_desired_pt(1)  = _odom_start_pt(1) - 5*sin(-_odom_yaw);
     _odom_desired_pt(2)  = _odom_start_pt(2);
 
 
@@ -314,7 +320,8 @@ void rcvPoseGraphCallbck(const geometry_msgs::PoseArray pose_graph_msg)
 
     cloud_pose_graph->width = pose_graph_msg.poses.size();
 
-    std::cout << "cloud_pose_graph.points.size: " << cloud_pose_graph->points.size() << std::endl;
+    // DEBUGGING
+    // std::cout << "cloud_pose_graph.points.size: " << cloud_pose_graph->points.size() << std::endl;
 
     sensor_msgs::PointCloud2 poseMap;
     pcl::toROSMsg(*cloud_pose_graph, poseMap);
@@ -369,8 +376,9 @@ void rcvPoseGraphCallbck(const geometry_msgs::PoseArray pose_graph_msg)
             cloud_pose_graph_local->push_back(pose_graph_local_pt);
         }
 
-        std::cout << "local_cnt: " << local_cnt << std::endl;
-        std::cout << "pointIdxRadiusSearch.size(): " << pointIdxRadiusSearch.size() << std::endl;
+        // DEBUGGING
+        // std::cout << "local_cnt: " << local_cnt << std::endl;
+        // std::cout << "pointIdxRadiusSearch.size(): " << pointIdxRadiusSearch.size() << std::endl;
 
         cloud_pose_graph_local->width = pointIdxRadiusSearch.size();
 
@@ -390,12 +398,8 @@ void rcvPoseGraphCallbck(const geometry_msgs::PoseArray pose_graph_msg)
         sensor_msgs::PointCloud2 poseGraphLocalMap;
         pcl::toROSMsg(*cloud_explored, poseGraphLocalMap);
         _map_pose_graph_local_vis_pub.publish(poseGraphLocalMap);
-
     }
-
-
 }
-
 
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 {
@@ -403,6 +407,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     _start_pt               = _odom_start_pt;
     _start_pt_rounding_eror = _odom_start_pt_rounding_eror;
     _desired_pt             = _odom_desired_pt;
+    _yaw                    = _odom_yaw;
 
     pcl::PointCloud<pcl::PointXYZI> cloud;  
     pcl::fromROSMsg(pointcloud_map, cloud);
@@ -624,90 +629,94 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cloud_reward->is_dense = true;
     cloud_reward->header.frame_id = "odom";
 
-    float reward;
+    float total_reward;
+    float not_straight_ahead_penalty;
+    float exploration_reward;
     cnt = 0;
     long int max_idx = 0;
-    float max_dist = 0.0;
+    float max_reward = 0.0;
 
     float distance_to_explored_pt;
     float min_distance_to_all_explored_pts;
 
-    for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
+    if(cloud_time->points.size() > 0 && cloud_explored->points.size() > 0)
     {
-        min_distance_to_all_explored_pts = 10.0;
-
-        pcl::PointXYZI reward_pt = idx2pt(grid_idx);
-
-        for (int i = 0; i < cloud_explored->points.size(); i++)
+        for (int i = 0; i < cloud_time->points.size(); i++)
         {
-            pcl::PointXYZI explored_pt = cloud_explored->points[i];
-
-            // Compute distance to nearest explored point
-            distance_to_explored_pt = pcl::geometry::distance(reward_pt, explored_pt);
-            if (distance_to_explored_pt < min_distance_to_all_explored_pts)
+            min_distance_to_all_explored_pts = 10.0;
+            pcl::PointXYZI reward_pt = cloud_time->points[i];
+            for (int j = 0; j < cloud_explored->points.size(); j++)
             {
-                min_distance_to_all_explored_pts = distance_to_explored_pt;
+                pcl::PointXYZI explored_pt = cloud_explored->points[j];
+                // Compute distance to nearest explored point
+                distance_to_explored_pt = pcl::geometry::distance(cloud_time->points[i], cloud_explored->points[j]);
+                if (distance_to_explored_pt < min_distance_to_all_explored_pts)
+                {
+                    min_distance_to_all_explored_pts = distance_to_explored_pt;
+                }
             }
-        }
-        reward_pt.intensity = min_distance_to_all_explored_pts;
-
-        // Push traversable points to pcl
-        if(grid_fmm_3d[grid_idx].getArrivalTime() > 0 && grid_fmm_3d[grid_idx].getArrivalTime() < 99999)
-        {
-            cnt++;
+            not_straight_ahead_penalty = - 0.25 * sqrt((reward_pt.x - _desired_pt(0))*(reward_pt.x - _desired_pt(0))
+                                                     + (reward_pt.y - _desired_pt(1))*(reward_pt.y - _desired_pt(1))); // DISTANCE FROM GOAL POINT IN FRONT OF ROBOT
+            exploration_reward = min_distance_to_all_explored_pts;
+            total_reward = exploration_reward + not_straight_ahead_penalty;
+            reward_pt.intensity = total_reward;
             cloud_reward->push_back(reward_pt);
 
-            // Find point farthest away
-            if (min_distance_to_all_explored_pts > max_dist)
+            // Find farthest point from explored areas
+            if (total_reward > max_reward)
             {
-                max_idx = cnt - 1;
-                max_dist = min_distance_to_all_explored_pts;
+                max_idx = i;
+                max_reward = total_reward;
             }
+
         }
+        cloud_reward->width = cloud_time->points.size();
+
+
     }
-    cloud_reward->width = cnt;
-    
+
     ////////////////////////////
     // REMOVE EXPLORED POINTS //
     ////////////////////////////
 
-    pcl::KdTreeFLANN<pcl::PointXYZI> kdtree_reward;
+    // pcl::KdTreeFLANN<pcl::PointXYZI> kdtree_reward;
     
-    std::vector<int> explored_pointIdxRadiusSearch;
-    std::vector<float> explored_pointRadiusSquaredDistance;
+    // std::vector<int> explored_pointIdxRadiusSearch;
+    // std::vector<float> explored_pointRadiusSquaredDistance;
 
-    if(cloud_reward->points.size() > 0 && cloud_explored->points.size() > 0)
-    {
-        for (int i = 0; i < cloud_explored->points.size(); i++)
-        {
-            kdtree_reward.setInputCloud (cloud_reward);
+    // if(cloud_reward->points.size() > 0 && cloud_explored->points.size() > 0)
+    // {
+    //     for (int i = 0; i < cloud_explored->points.size(); i++)
+    //     {
+    //         kdtree_reward.setInputCloud (cloud_reward);
 
-            pcl::PointXYZI explored_pt;
-            explored_pt.x = cloud_explored->points[i].x;
-            explored_pt.y = cloud_explored->points[i].y;
-            explored_pt.z = cloud_explored->points[i].z;
-            explored_pt.intensity = 0;
+    //         pcl::PointXYZI explored_pt;
+    //         explored_pt.x = cloud_explored->points[i].x;
+    //         explored_pt.y = cloud_explored->points[i].y;
+    //         explored_pt.z = cloud_explored->points[i].z;
+    //         explored_pt.intensity = 0;
 
-            if ( kdtree_reward.radiusSearch(explored_pt, (float)_exploration_seen_radius, explored_pointIdxRadiusSearch, explored_pointRadiusSquaredDistance) > 0 )
-            {
-                sort(explored_pointIdxRadiusSearch.begin(), explored_pointIdxRadiusSearch.end(), greater<int>()); 
+    //         if ( kdtree_reward.radiusSearch(explored_pt, (float)_exploration_seen_radius, explored_pointIdxRadiusSearch, explored_pointRadiusSquaredDistance) > 0 )
+    //         {
+    //             sort(explored_pointIdxRadiusSearch.begin(), explored_pointIdxRadiusSearch.end(), greater<int>()); 
 
-                // DEBUGGING                    
-                // std::cout << "explored_pointIdxRadiusSearch.size(): " << explored_pointIdxRadiusSearch.size() << std::endl;
+    //             // DEBUGGING                    
+    //             // std::cout << "explored_pointIdxRadiusSearch.size(): " << explored_pointIdxRadiusSearch.size() << std::endl;
 
-                for (size_t i = 0; i < explored_pointIdxRadiusSearch.size (); ++i)
-                {
-                    cloud_reward->erase(cloud_reward->begin() + explored_pointIdxRadiusSearch[i]);
-                }
-            }
-            explored_pointIdxRadiusSearch.clear();
-            explored_pointRadiusSquaredDistance.clear();
-        }
-    }
+    //             for (size_t i = 0; i < explored_pointIdxRadiusSearch.size (); ++i)
+    //             {
+    //                 cloud_reward->erase(cloud_reward->begin() + explored_pointIdxRadiusSearch[i]);
+    //             }
+    //         }
+    //         explored_pointIdxRadiusSearch.clear();
+    //         explored_pointRadiusSquaredDistance.clear();
+    //     }
+    // }
 
     // DEBUGGING
     // std::cout << "cloud_reward cnt: " << cnt << std::endl;
     // std::cout << "cloud_reward.points.size: " << cloud_time.points.size() << std::endl;
+
 
     sensor_msgs::PointCloud2 rewardMap;
     pcl::toROSMsg(*cloud_reward, rewardMap);
@@ -730,7 +739,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         // DEBUGGING
         // std::cout << "inside if: cloud_reward.width: " << cloud_reward.width << std::endl;
         // std::cout << "inside if: max_idx: " << max_idx << std::endl;
-        // std::cout << "inside if: max_dist: " << max_dist << std::endl;
+        // std::cout << "inside if: max_reward: " << max_reward << std::endl;
         // std::cout << "inside if: cloud_reward.points[max_idx].x: " << cloud_reward.points[max_idx].x << std::endl;
         // std::cout << "inside if: cloud_reward.points[max_idx].x: " << cloud_reward.points[max_idx].x << std::endl;
         // std::cout << "inside if: cloud_reward.points[max_idx].y: " << cloud_reward.points[max_idx].y << std::endl;
