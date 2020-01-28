@@ -79,6 +79,8 @@ int _max_x_idx, _max_y_idx, _max_z_idx;
 unsigned long int _max_grid_idx;
 int x_size, y_size, z_size;
 
+pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_explored (new pcl::PointCloud<pcl::PointXYZI>);
+
 // ROS
 ros::Subscriber _map_sub;
 ros::Subscriber _odom_sub; 
@@ -291,6 +293,10 @@ void rcvPoseGraphCallbck(const geometry_msgs::PoseArray pose_graph_msg)
     // Record start time
     auto start = std::chrono::high_resolution_clock::now();
 
+    ///////////////////////////
+    // Create Pose Graph PCL //
+    ///////////////////////////
+
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_pose_graph (new pcl::PointCloud<pcl::PointXYZI>);
     cloud_pose_graph->height = 1;
     cloud_pose_graph->is_dense = true;
@@ -319,11 +325,9 @@ void rcvPoseGraphCallbck(const geometry_msgs::PoseArray pose_graph_msg)
     std::chrono::duration<double> elapsed = finish - start;
     std::cout << "Elapsed time: " << elapsed.count() << " s\n";
 
-
-
-
-
-
+    /////////////////////////////////
+    // Create Local Pose Graph PCL //
+    /////////////////////////////////
 
     pcl::KdTreeFLANN<pcl::PointXYZI> kdtree;
     kdtree.setInputCloud (cloud_pose_graph);
@@ -370,26 +374,21 @@ void rcvPoseGraphCallbck(const geometry_msgs::PoseArray pose_graph_msg)
 
         cloud_pose_graph_local->width = pointIdxRadiusSearch.size();
 
+        /////////////////////////////////////////////////////
+        // Create Filtered Local Pose Graph (Explored) PCL //
+        /////////////////////////////////////////////////////
 
-
-        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_pose_graph_local_filtered (new pcl::PointCloud<pcl::PointXYZI>);
         // Create the filtering object
         pcl::VoxelGrid<pcl::PointXYZI> sor;
         sor.setInputCloud (cloud_pose_graph_local);
         sor.setLeafSize (2.0f, 2.0f, 2.0f);
-        sor.filter (*cloud_pose_graph_local_filtered);
+        sor.filter (*cloud_explored);
 
-        std::cerr << "PointCloud after filtering: " << cloud_pose_graph_local_filtered->width * cloud_pose_graph_local_filtered->height 
-            << " data points (" << pcl::getFieldsList (*cloud_pose_graph_local_filtered) << ").";
-            
-            
-            
-            
-            
-            
-            
+        std::cerr << "PointCloud after filtering: " << cloud_explored->width * cloud_explored->height 
+            << " data points (" << pcl::getFieldsList (*cloud_explored) << ").";
+                        
         sensor_msgs::PointCloud2 poseGraphLocalMap;
-        pcl::toROSMsg(*cloud_pose_graph_local_filtered, poseGraphLocalMap);
+        pcl::toROSMsg(*cloud_explored, poseGraphLocalMap);
         _map_pose_graph_local_vis_pub.publish(poseGraphLocalMap);
 
     }
@@ -654,6 +653,59 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         }
     }
     cloud_reward->width = cnt;
+    
+    ////////////////////////////
+    // REMOVE EXPLORED POINTS //
+    ////////////////////////////
+
+
+    pcl::KdTreeFLANN<pcl::PointXYZI> kdtree_reward;
+    
+    std::vector<int> explored_pointIdxRadiusSearch;
+    std::vector<float> explored_pointRadiusSquaredDistance;
+
+    if(cloud_reward->points.size() > 0 && cloud_explored->points.size() > 0)
+    {
+        
+
+        for (int i = 0; i < cloud_explored->points.size(); i++)
+        {
+
+        kdtree_reward.setInputCloud (cloud_reward);
+
+            pcl::PointXYZI explored_pt;
+            explored_pt.x = cloud_explored->points[i].x;
+            explored_pt.y = cloud_explored->points[i].y;
+            explored_pt.z = cloud_explored->points[i].z;
+            explored_pt.intensity = 0;
+
+            if ( kdtree_reward.radiusSearch(explored_pt, (float)_exploration_seen_radius, explored_pointIdxRadiusSearch, explored_pointRadiusSquaredDistance) > 0 )
+            {
+
+                sort(explored_pointIdxRadiusSearch.begin(), explored_pointIdxRadiusSearch.end(), greater<int>()); 
+                      
+                std::cout << "explored_pointIdxRadiusSearch.size(): " << explored_pointIdxRadiusSearch.size() << std::endl;
+
+                for (size_t i = 0; i < explored_pointIdxRadiusSearch.size (); ++i)
+                {
+                    cloud_reward->erase(cloud_reward->begin() + explored_pointIdxRadiusSearch[i]);
+                }
+
+            }
+
+            explored_pointIdxRadiusSearch.clear();
+            explored_pointRadiusSquaredDistance.clear();
+
+
+            
+        }
+
+        // cloud_explored->erase(0);
+
+
+    }
+
+
 
     // DEBUGGING
     // std::cout << "cloud_reward cnt: " << cnt << std::endl;
