@@ -696,6 +696,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     geometry_msgs::PointStamped goal_point;
     geometry_msgs::PoseStamped goal_pose;
 
+    vector<float> best_line_of_sight_path_pt_xyz = robot_pt_xyz;
+
     for(int path_idx = 0; path_idx < int(path_coord.size()); path_idx++)
     {
         // Find xyz coordinate of path point[path_idx]
@@ -759,13 +761,13 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 p.z = line_of_sight_pt(2);
                 line_of_sight_vector_msg.points.push_back(p);
                 line_of_sight_vectors_msg.markers.push_back(line_of_sight_vector_msg);
-                if(check_vect_dist > check_vect_dist_max)
-                {
-                    goal_pt(0) = line_of_sight_pt(0);
-                    goal_pt(1) = line_of_sight_pt(1);
-                    goal_pt(2) = line_of_sight_pt(2);
-                    check_vect_dist_max = check_vect_dist;
-                }
+                // if(check_vect_dist > check_vect_dist_max)
+                // {
+                //     goal_pt(0) = line_of_sight_pt(0);
+                //     goal_pt(1) = line_of_sight_pt(1);
+                //     goal_pt(2) = line_of_sight_pt(2);
+                //     check_vect_dist_max = check_vect_dist;
+                // }
                 line_of_sight_idx++;
             }
             else
@@ -808,60 +810,64 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 collision_detected = 1;
             }
         }
-        
-        goal_point_uncropped.header.stamp = ros::Time::now();
-        goal_point_uncropped.header.frame_id = "odom";
-        goal_point_uncropped.point.x = goal_pt(0);
-        goal_point_uncropped.point.y = goal_pt(1);
-        goal_point_uncropped.point.z = goal_pt(2);
-            
-        goal_pose_uncropped.header.stamp = ros::Time::now();
-        goal_pose_uncropped.header.frame_id = "odom";
-        goal_pose_uncropped.pose.position.x = goal_pt(0);
-        goal_pose_uncropped.pose.position.y = goal_pt(1);
-        goal_pose_uncropped.pose.position.z = goal_pt(2);
-        goal_pose_uncropped.pose.orientation.x = 0.0;
-        goal_pose_uncropped.pose.orientation.y = 0.0;
-        goal_pose_uncropped.pose.orientation.z = 0.0;
-        goal_pose_uncropped.pose.orientation.w = 1.0;
-
-
-        float goal_point_uncropped_dist = sqrt((goal_pt(0) - robot_pt(0)) * (goal_pt(0) - robot_pt(0))
-                                             + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
-                                             + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
-
-        std::cout << "uncropped distance" << goal_point_uncropped_dist << std::endl;
-
-        if(goal_point_uncropped_dist > _look_ahead_distance)
+        if(!collision_detected)
         {
-            goal_pt(0) = robot_pt(0) + (goal_pt(0) - robot_pt(0)) / goal_point_uncropped_dist * _look_ahead_distance;
-            goal_pt(1) = robot_pt(1) + (goal_pt(1) - robot_pt(1)) / goal_point_uncropped_dist * _look_ahead_distance;
-            goal_pt(2) = robot_pt(2) + (goal_pt(2) - robot_pt(2)) / goal_point_uncropped_dist * _look_ahead_distance;
+            goal_pt(0) = path_pt_xyz[0];
+            goal_pt(1) = path_pt_xyz[1];
+            goal_pt(2) = path_pt_xyz[2];
         }
-
-
-        float goal_point_cropped_dist = sqrt((goal_pt(0) - robot_pt(0)) * (goal_pt(0) - robot_pt(0))
-                                           + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
-                                           + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
-
-        std::cout << "cropped distance" << goal_point_cropped_dist << std::endl;
-
-        goal_point.header.stamp = ros::Time::now();
-        goal_point.header.frame_id = "odom";
-        goal_point.point.x = goal_pt(0);
-        goal_point.point.y = goal_pt(1);
-        goal_point.point.z = goal_pt(2);
-            
-        goal_pose.header.stamp = ros::Time::now();
-        goal_pose.header.frame_id = "odom";
-        goal_pose.pose.position.x = goal_pt(0);
-        goal_pose.pose.position.y = goal_pt(1);
-        goal_pose.pose.position.z = goal_pt(2);
-        goal_pose.pose.orientation.x = 0.0;
-        goal_pose.pose.orientation.y = 0.0;
-        goal_pose.pose.orientation.z = 0.0;
-        goal_pose.pose.orientation.w = 1.0;
     }
+
+    goal_point_uncropped.header.stamp = ros::Time::now();
+    goal_point_uncropped.header.frame_id = "odom";
+    goal_point_uncropped.point.x = goal_pt(0);
+    goal_point_uncropped.point.y = goal_pt(1);
+    goal_point_uncropped.point.z = goal_pt(2);
+        
+    goal_pose_uncropped.header.stamp = ros::Time::now();
+    goal_pose_uncropped.header.frame_id = "odom";
+    goal_pose_uncropped.pose.position.x = goal_pt(0);
+    goal_pose_uncropped.pose.position.y = goal_pt(1);
+    goal_pose_uncropped.pose.position.z = goal_pt(2);
+    goal_pose_uncropped.pose.orientation.x = 0.0;
+    goal_pose_uncropped.pose.orientation.y = 0.0;
+    goal_pose_uncropped.pose.orientation.z = 0.0;
+    goal_pose_uncropped.pose.orientation.w = 1.0;
+
+    float goal_point_uncropped_dist = sqrt((goal_pt(0) - robot_pt(0)) * (goal_pt(0) - robot_pt(0))
+                                            + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
+                                            + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
+
+    std::cout << "uncropped distance" << goal_point_uncropped_dist << std::endl;
+
+    if(goal_point_uncropped_dist > _look_ahead_distance)
+    {
+        goal_pt(0) = robot_pt(0) + (goal_pt(0) - robot_pt(0)) / goal_point_uncropped_dist * _look_ahead_distance;
+        goal_pt(1) = robot_pt(1) + (goal_pt(1) - robot_pt(1)) / goal_point_uncropped_dist * _look_ahead_distance;
+        goal_pt(2) = robot_pt(2) + (goal_pt(2) - robot_pt(2)) / goal_point_uncropped_dist * _look_ahead_distance;
+    }
+
+    float goal_point_cropped_dist = sqrt((goal_pt(0) - robot_pt(0)) * (goal_pt(0) - robot_pt(0))
+                                        + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
+                                        + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
+
+    std::cout << "cropped distance" << goal_point_cropped_dist << std::endl;
+
+    goal_point.header.stamp = ros::Time::now();
+    goal_point.header.frame_id = "odom";
+    goal_point.point.x = goal_pt(0);
+    goal_point.point.y = goal_pt(1);
+    goal_point.point.z = goal_pt(2);
+        
+    goal_pose.header.stamp = ros::Time::now();
+    goal_pose.header.frame_id = "odom";
+    goal_pose.pose.position.x = goal_pt(0);
+    goal_pose.pose.position.y = goal_pt(1);
+    goal_pose.pose.position.z = goal_pt(2);
+    goal_pose.pose.orientation.x = 0.0;
+    goal_pose.pose.orientation.y = 0.0;
+    goal_pose.pose.orientation.z = 0.0;
+    goal_pose.pose.orientation.w = 1.0;
 
     _goal_point_uncropped_pub.publish(goal_point_uncropped);
     _goal_pose_uncropped_pub.publish(goal_pose_uncropped);
