@@ -895,6 +895,10 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     vector<float> best_line_of_sight_path_pt_xyz = robot_pt_xyz;
 
+    bool collision_detected = 0;
+    bool beyond_max_path_length = 0;
+    float accum_path_length = 0;
+
     for(int path_idx = 0; path_idx < int(path_coord.size()); path_idx++)
     {
         // Find xyz coordinate of path point[path_idx]
@@ -902,9 +906,23 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                                      path_coord[path_idx](1),
                                      path_coord[path_idx](2)};
 
+        if(path_idx > 0)
+        {
+            accum_path_length += sqrt((path_coord[path_idx](0) - path_coord[path_idx-1](0))*(path_coord[path_idx](0) - path_coord[path_idx-1](0))
+                                    + (path_coord[path_idx](1) - path_coord[path_idx-1](1))*(path_coord[path_idx](1) - path_coord[path_idx-1](1))
+                                    + (path_coord[path_idx](2) - path_coord[path_idx-1](2))*(path_coord[path_idx](2) - path_coord[path_idx-1](2)));
+        }
+        
+        if(accum_path_length > _max_goalpoint_distance)
+        {
+            beyond_max_path_length = 1;
+        }
+
+        // DEBUGGING
+        // std::cout << "accum_path_length: " << accum_path_length << std::endl;
+
         float path_pt_distance = sqrt(path_pt_xyz[0]*path_pt_xyz[0] + path_pt_xyz[1]*path_pt_xyz[1] + path_pt_xyz[2]*path_pt_xyz[2]);
         int num_interpolated_pts_to_check = ceil(2 * _inv_resolution * (float)path_pt_distance);
-        bool collision_detected = 0;
 
         for(int interp_idx = 1; interp_idx < num_interpolated_pts_to_check + 1; interp_idx++)
         {
@@ -918,7 +936,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                                           check_vect_xyz[2] + robot_pt_xyz[2]};
             vector<long int> check_pt_idx = ptVect2idx(check_pt_xyz);
             float d = grid_fmm_3d[check_pt_idx[3]].getOccupancy();
-            if((d <= 0) || collision_detected)
+            if((d <= 0) || collision_detected || beyond_max_path_length)
             {
                 collision_detected = 1;
             }
@@ -958,13 +976,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 p.z = line_of_sight_pt(2);
                 line_of_sight_vector_msg.points.push_back(p);
                 line_of_sight_vectors_msg.markers.push_back(line_of_sight_vector_msg);
-                // if(check_vect_dist > check_vect_dist_max)
-                // {
-                //     goal_pt(0) = line_of_sight_pt(0);
-                //     goal_pt(1) = line_of_sight_pt(1);
-                //     goal_pt(2) = line_of_sight_pt(2);
-                //     check_vect_dist_max = check_vect_dist;
-                // }
                 line_of_sight_idx++;
             }
             else
@@ -1005,7 +1016,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 collision_vectors_msg.markers.push_back(collision_vector_msg);
                 collision_idx++;
                 collision_detected = 1;
-            }
+            }     
         }
         if(!collision_detected)
         {
