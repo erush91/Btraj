@@ -630,8 +630,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     cloud_reward->header.frame_id = "odom";
 
     float total_reward;
-    float not_straight_ahead_penalty;
     float exploration_reward;
+    float not_straight_ahead_penalty;
+    float elevation_change_penalty;
     cnt = 0;
     long int max_idx = 0;
     float max_reward = 0.0;
@@ -639,7 +640,35 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     float distance_to_explored_pt;
     float min_distance_to_all_explored_pts;
 
-    if(cloud_time->points.size() > 0 && cloud_explored->points.size() > 0)
+    pcl::PointXYZI current_pose_pt;
+    current_pose_pt.x = _start_pt(0);
+    current_pose_pt.y = _start_pt(1);
+    current_pose_pt.z = _start_pt(2);
+   
+    if(cloud_time->points.size() > 0 && cloud_explored->points.size() <= 0)
+    {
+        for (int i = 0; i < cloud_time->points.size(); i++)
+        {
+            min_distance_to_all_explored_pts = 10.0;
+            pcl::PointXYZI reward_pt = cloud_time->points[i];
+            exploration_reward = pcl::geometry::distance(cloud_time->points[i], current_pose_pt);
+            not_straight_ahead_penalty  = - 0.25 * sqrt((reward_pt.x - _desired_pt(0))*(reward_pt.x - _desired_pt(0))
+                                                      + (reward_pt.y - _desired_pt(1))*(reward_pt.y - _desired_pt(1))); // DISTANCE FROM GOAL POINT IN FRONT OF ROBOT
+            elevation_change_penalty    = - 0.25 * sqrt((reward_pt.z - _start_pt(2))*(reward_pt.z - _start_pt(2))); // Z CHANGE
+            total_reward = exploration_reward + not_straight_ahead_penalty + elevation_change_penalty;
+            reward_pt.intensity = total_reward;
+            cloud_reward->push_back(reward_pt); 
+
+            // Find max reward point
+            if (total_reward > max_reward)
+            {
+                max_idx = i;
+                max_reward = total_reward;
+            }
+        }
+
+    }
+    else
     {
         for (int i = 0; i < cloud_time->points.size(); i++)
         {
@@ -655,25 +684,23 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                     min_distance_to_all_explored_pts = distance_to_explored_pt;
                 }
             }
-            not_straight_ahead_penalty = - 0.25 * sqrt((reward_pt.x - _desired_pt(0))*(reward_pt.x - _desired_pt(0))
-                                                     + (reward_pt.y - _desired_pt(1))*(reward_pt.y - _desired_pt(1))); // DISTANCE FROM GOAL POINT IN FRONT OF ROBOT
-            exploration_reward = min_distance_to_all_explored_pts;
-            total_reward = exploration_reward + not_straight_ahead_penalty;
+            exploration_reward = min_distance_to_all_explored_pts;  
+            not_straight_ahead_penalty  = - 0.25 * sqrt((reward_pt.x - _desired_pt(0))*(reward_pt.x - _desired_pt(0))
+                                                      + (reward_pt.y - _desired_pt(1))*(reward_pt.y - _desired_pt(1))); // DISTANCE FROM GOAL POINT IN FRONT OF ROBOT
+            elevation_change_penalty    = - 0.25 * sqrt((reward_pt.z - _start_pt(2))*(reward_pt.z - _start_pt(2))); // Z CHANGE
+            total_reward = exploration_reward + not_straight_ahead_penalty + elevation_change_penalty;
             reward_pt.intensity = total_reward;
             cloud_reward->push_back(reward_pt);
 
-            // Find farthest point from explored areas
+            // Find max reward point
             if (total_reward > max_reward)
             {
                 max_idx = i;
                 max_reward = total_reward;
             }
-
         }
-        cloud_reward->width = cloud_time->points.size();
-
-
     }
+    cloud_reward->width = cloud_time->points.size();
 
     ////////////////////////////
     // REMOVE EXPLORED POINTS //
@@ -716,7 +743,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // DEBUGGING
     // std::cout << "cloud_reward cnt: " << cnt << std::endl;
     // std::cout << "cloud_reward.points.size: " << cloud_time.points.size() << std::endl;
-
 
     sensor_msgs::PointCloud2 rewardMap;
     pcl::toROSMsg(*cloud_reward, rewardMap);
