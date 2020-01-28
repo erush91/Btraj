@@ -6,6 +6,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/common/geometry.h> // squaredDistance
 #include <pcl/kdtree/kdtree_flann.h> // For K-nearest neighbor search
 
 #include <ros/ros.h>
@@ -71,6 +72,7 @@ Vector3d max_reward_pt;
 Vector3d _map_origin;
 double _x_size, _y_size, _z_size;
 double _look_ahead_distance;
+double _visability_distance;
 int _max_x_idx, _max_y_idx, _max_z_idx;
 unsigned long int _max_grid_idx;
 int x_size, y_size, z_size;
@@ -134,12 +136,14 @@ int main(int argc, char** argv)
     _goal_point_pub                 = nh.advertise<geometry_msgs::PointStamped>("out/goal/point", 1);
     _max_reward_pose_pub            = nh.advertise<geometry_msgs::PoseStamped>("out/goal/max_reward_pose", 1);
     _max_reward_point_pub           = nh.advertise<geometry_msgs::PointStamped>("out/goal/max_reward_point", 1);
+    
 
-    nh.param("map/resolution",              _resolution, 0.2);
-    nh.param("map/x_size",                  _x_size, 50.0);
-    nh.param("map/y_size",                  _y_size, 50.0);
-    nh.param("map/z_size",                  _z_size, 50.0);
-    nh.param("goal/look_ahead_distance",   _look_ahead_distance, 2.5);
+    nh.param("map/resolution",                  _resolution, 0.2);
+    nh.param("map/x_size",                      _x_size, 15.0);
+    nh.param("map/y_size",                      _y_size, 15.0);
+    nh.param("map/z_size",                      _z_size, 15.0);
+    nh.param("goal/look_ahead_distance",        _look_ahead_distance, 2.5);
+    nh.param("explore/visability_distance",     _visability_distance, 5.0);
 
     // Origin is located in the middle of the map
     _map_origin = {- _x_size / 2.0, - _y_size / 2.0 , - _z_size / 2.0};
@@ -348,20 +352,20 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     }
 
     // Assign the ESDF
-    for (unsigned long int pcl_idx = 0; pcl_idx < cloud.points.size(); pcl_idx++)
+    pcl::PointXYZI explore_start_pt;
+    explore_start_pt.x = _start_pt(0) - _start_pt_rounding_eror(0);
+    explore_start_pt.y = _start_pt(1) - _start_pt_rounding_eror(1);
+    explore_start_pt.z = _start_pt(2) - _start_pt_rounding_eror(2);
+    float visability_distance_squared = _visability_distance * _visability_distance;
+    vector<long int> fmm_vel_idx;
+    for (unsigned long int esdf_idx = 0; esdf_idx < cloud.points.size(); esdf_idx++)
     {
-        pcl::PointXYZI fmm_vel_pt = cloud.points[pcl_idx];
-        vector<long int> fmm_vel_idx = ptPcl2idx(fmm_vel_pt);
-
-        if(fmm_vel_idx[0] >= 0 && fmm_vel_idx[0] < _max_x_idx)
+        pcl::PointXYZI fmm_vel_pt = cloud.points[esdf_idx];
+        if(pcl::geometry::squaredDistance(fmm_vel_pt, explore_start_pt) < visability_distance_squared)
         {
-            if(fmm_vel_idx[1] >= 0 && fmm_vel_idx[1] < _max_y_idx)
-            {
-                if(fmm_vel_idx[2] >= 0 && fmm_vel_idx[2] < _max_z_idx)
-                {
-                    grid_fmm_3d[fmm_vel_idx[3]].setOccupancy(velMapping(cloud.points[pcl_idx].intensity));
-                }
-            }
+            fmm_vel_idx = ptPcl2idx(fmm_vel_pt);
+            grid_fmm_3d[fmm_vel_idx[3]].setOccupancy(velMapping(cloud.points[esdf_idx].intensity));
+            
         }
     }
 
@@ -415,7 +419,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // FIND TRAVERSABLE POINTS NEAR ROBOT //
     ////////////////////////////////////////
 
-
     pcl::KdTreeFLANN<pcl::PointXYZI> kdtree;
     kdtree.setInputCloud (cloud_fmm_vel);
     pcl::PointXYZI searchPoint;
@@ -446,15 +449,6 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         //             << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].z
         //             << "    (dist: " << pointRadiusSquaredDistance[i] << ")" << std::endl;
     }
-
-
-
-
-
-
-
-
-
 
     //////////////////////////////
     // SELECT FMM INITIAL POINT //
