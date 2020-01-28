@@ -8,6 +8,7 @@
 #include <pcl/point_types.h>
 #include <pcl/common/geometry.h> // squaredDistance
 #include <pcl/kdtree/kdtree_flann.h> // For K-nearest neighbor search
+#include <pcl/filters/voxel_grid.h> // Voxel grid filter
 
 #include <ros/ros.h>
 #include <ros/console.h>
@@ -71,8 +72,9 @@ Vector3d _odom_desired_pt;
 Vector3d max_reward_pt;
 Vector3d _map_origin;
 double _x_size, _y_size, _z_size;
-double _look_ahead_distance;
-double _visability_distance;
+double _max_goalpoint_distance;
+double _max_curiosity_distance;
+double _exploration_seen_radius;
 int _max_x_idx, _max_y_idx, _max_z_idx;
 unsigned long int _max_grid_idx;
 int x_size, y_size, z_size;
@@ -82,11 +84,12 @@ ros::Subscriber _map_sub;
 ros::Subscriber _odom_sub; 
 ros::Subscriber _pose_graph_sub;
 
-ros::Publisher _fm_path_vis_pub;
-ros::Publisher _map_fmm_vel_vis_pub;
-ros::Publisher _map_fmm_time_vis_pub;
-ros::Publisher _map_fmm_reward_vis_pub;
-ros::Publisher _map_pose_vis_pub;
+ros::Publisher _path_vis_pub;
+ros::Publisher _map_vel_vis_pub;
+ros::Publisher _map_time_vis_pub;
+ros::Publisher _map_reward_vis_pub;
+ros::Publisher _map_pose_graph_vis_pub;
+ros::Publisher _map_pose_graph_local_vis_pub;
 ros::Publisher _line_of_sight_path_vis_pub;
 ros::Publisher _line_of_sight_vector_vis_pub;
 ros::Publisher _collision_vector_vis_pub;
@@ -122,11 +125,12 @@ int main(int argc, char** argv)
     _odom_sub           = nh.subscribe("odometry",   1, rcvOdometryCallbck);
     _pose_graph_sub     = nh.subscribe("pose_array", 1, rcvPoseGraphCallbck);
 
-    _map_fmm_vel_vis_pub            = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/velocity", 1);
-    _map_fmm_time_vis_pub           = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/arrival_time", 1);
-    _map_fmm_reward_vis_pub         = nh.advertise<sensor_msgs::PointCloud2>("viz/map/fmm/reward", 1);
-    _map_pose_vis_pub               = nh.advertise<sensor_msgs::PointCloud2>("viz/map/pose", 1);
-    _fm_path_vis_pub                = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/fmm_path", 1);
+    _map_vel_vis_pub                = nh.advertise<sensor_msgs::PointCloud2>("viz/map/velocity", 1);
+    _map_time_vis_pub               = nh.advertise<sensor_msgs::PointCloud2>("viz/map/arrival_time", 1);
+    _map_reward_vis_pub             = nh.advertise<sensor_msgs::PointCloud2>("viz/map/reward", 1);
+    _map_pose_graph_vis_pub         = nh.advertise<sensor_msgs::PointCloud2>("viz/map/pose_graph", 1);
+    _map_pose_graph_local_vis_pub   = nh.advertise<sensor_msgs::PointCloud2>("viz/map/pose_graph_local", 1);
+    _path_vis_pub                   = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/path", 1);
     _line_of_sight_path_vis_pub     = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/line_of_sight_path", 1);
     _line_of_sight_vector_vis_pub   = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/line_of_sight/vectors", 1);
     _collision_vector_vis_pub       = nh.advertise<visualization_msgs::MarkerArray>("viz/goal/collision/vectors", 1);
@@ -138,12 +142,13 @@ int main(int argc, char** argv)
     _max_reward_point_pub           = nh.advertise<geometry_msgs::PointStamped>("out/goal/max_reward_point", 1);
     
 
-    nh.param("map/resolution",                  _resolution, 0.2);
-    nh.param("map/x_size",                      _x_size, 15.0);
-    nh.param("map/y_size",                      _y_size, 15.0);
-    nh.param("map/z_size",                      _z_size, 15.0);
-    nh.param("goal/look_ahead_distance",        _look_ahead_distance, 2.5);
-    nh.param("explore/visability_distance",     _visability_distance, 5.0);
+    nh.param("map_resolution",                  _resolution, 0.2);
+    nh.param("map_size_x",                      _x_size, 15.0);
+    nh.param("map_size_y",                      _y_size, 15.0);
+    nh.param("map_size_z",                      _z_size, 15.0);
+    nh.param("planner_max_goalpoint_distance",  _max_goalpoint_distance, 2.5);
+    nh.param("planner_max_curiosity_distance",  _max_curiosity_distance, 7.4);
+    nh.param("planner_exploration_seen_radius", _exploration_seen_radius, 5.0);
 
     // Origin is located in the middle of the map
     _map_origin = {- _x_size / 2.0, - _y_size / 2.0 , - _z_size / 2.0};
@@ -307,12 +312,89 @@ void rcvPoseGraphCallbck(const geometry_msgs::PoseArray pose_graph_msg)
 
     sensor_msgs::PointCloud2 poseMap;
     pcl::toROSMsg(*cloud_pose_graph, poseMap);
-    _map_pose_vis_pub.publish(poseMap);
+    _map_pose_graph_vis_pub.publish(poseMap);
 
     // Record end time
     auto finish = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = finish - start;
     std::cout << "Elapsed time: " << elapsed.count() << " s\n";
+
+
+
+
+
+
+
+    pcl::KdTreeFLANN<pcl::PointXYZI> kdtree;
+    kdtree.setInputCloud (cloud_pose_graph);
+    pcl::PointXYZI searchPoint;
+    searchPoint.x = _start_pt(0) - _start_pt_rounding_eror(0);
+    searchPoint.y = _start_pt(1) - _start_pt_rounding_eror(1);
+    searchPoint.z = _start_pt(2) - _start_pt_rounding_eror(2);
+
+    // Neighbors within radius search
+
+    std::vector<int> pointIdxRadiusSearch;
+    std::vector<float> pointRadiusSquaredDistance;
+
+    float radius = _max_curiosity_distance + _exploration_seen_radius;
+
+    //DEBUGGING
+    // std::cout << "Neighbors within radius search at ("
+    //                    << searchPoint.x
+    //             << " " << searchPoint.y
+    //             << " " << searchPoint.z
+    //             << ") with radius=" << radius << std::endl;
+
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_pose_graph_local (new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_pose_graph_local->height = 1;
+    cloud_pose_graph_local->is_dense = true;
+    cloud_pose_graph_local->header.frame_id = "map";
+
+    int local_cnt = 0;
+    pcl::PointXYZI pose_graph_local_pt;
+    if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 0 )
+    {
+        for (std::size_t i = 0; i < pointIdxRadiusSearch.size (); ++i)
+        {
+            local_cnt ++;
+            pose_graph_local_pt.x = cloud_pose_graph->points[ pointIdxRadiusSearch[i] ].x;
+            pose_graph_local_pt.y = cloud_pose_graph->points[ pointIdxRadiusSearch[i] ].y;
+            pose_graph_local_pt.z = cloud_pose_graph->points[ pointIdxRadiusSearch[i] ].z;
+            pose_graph_local_pt.intensity = 0;
+            cloud_pose_graph_local->push_back(pose_graph_local_pt);
+        }
+
+        std::cout << "local_cnt: " << local_cnt << std::endl;
+        std::cout << "pointIdxRadiusSearch.size(): " << pointIdxRadiusSearch.size() << std::endl;
+
+        cloud_pose_graph_local->width = pointIdxRadiusSearch.size();
+
+
+
+        pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_pose_graph_local_filtered (new pcl::PointCloud<pcl::PointXYZI>);
+        // Create the filtering object
+        pcl::VoxelGrid<pcl::PointXYZI> sor;
+        sor.setInputCloud (cloud_pose_graph_local);
+        sor.setLeafSize (2.0f, 2.0f, 2.0f);
+        sor.filter (*cloud_pose_graph_local_filtered);
+
+        std::cerr << "PointCloud after filtering: " << cloud_pose_graph_local_filtered->width * cloud_pose_graph_local_filtered->height 
+            << " data points (" << pcl::getFieldsList (*cloud_pose_graph_local_filtered) << ").";
+            
+            
+            
+            
+            
+            
+            
+        sensor_msgs::PointCloud2 poseGraphLocalMap;
+        pcl::toROSMsg(*cloud_pose_graph_local_filtered, poseGraphLocalMap);
+        _map_pose_graph_local_vis_pub.publish(poseGraphLocalMap);
+
+    }
+
+
 }
 
 
@@ -335,9 +417,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // DEBUGGING
     // std::cout << "_start_pt: " << _start_pt(0) << ", " << _start_pt(1) << ", " << _start_pt(2) << std::endl;
     
-    //////////////////////////////
-    // LOCAL ESDF MAP (DISTANCE //
-    //////////////////////////////
+    ///////////////////////////////
+    // LOCAL ESDF MAP (DISTANCE) //
+    ///////////////////////////////
     
     Coord3D dimsize {x_size, y_size, z_size};
     FMGrid3D grid_fmm_3d(dimsize);
@@ -351,21 +433,20 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
         grid_fmm_3d[grid_idx].setOccupancy(0.0);
     }
 
-    // Assign the ESDF
+    // Assign the velocity pcl
     pcl::PointXYZI explore_start_pt;
     explore_start_pt.x = _start_pt(0) - _start_pt_rounding_eror(0);
     explore_start_pt.y = _start_pt(1) - _start_pt_rounding_eror(1);
     explore_start_pt.z = _start_pt(2) - _start_pt_rounding_eror(2);
-    float visability_distance_squared = _visability_distance * _visability_distance;
-    vector<long int> fmm_vel_idx;
+    float _max_curiosity_distance_squared = _max_curiosity_distance * _max_curiosity_distance;
+    vector<long int> vel_idx;
     for (unsigned long int esdf_idx = 0; esdf_idx < cloud.points.size(); esdf_idx++)
     {
-        pcl::PointXYZI fmm_vel_pt = cloud.points[esdf_idx];
-        if(pcl::geometry::squaredDistance(fmm_vel_pt, explore_start_pt) < visability_distance_squared)
+        pcl::PointXYZI vel_pt = cloud.points[esdf_idx];
+        if(pcl::geometry::squaredDistance(vel_pt, explore_start_pt) < _max_curiosity_distance_squared)
         {
-            fmm_vel_idx = ptPcl2idx(fmm_vel_pt);
-            grid_fmm_3d[fmm_vel_idx[3]].setOccupancy(velMapping(cloud.points[esdf_idx].intensity));
-            
+            vel_idx = ptPcl2idx(vel_pt);
+            grid_fmm_3d[vel_idx[3]].setOccupancy(velMapping(cloud.points[esdf_idx].intensity));   
         }
     }
 
@@ -388,39 +469,39 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // LOCAL ESDF PCL //
     ////////////////////
 
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fmm_vel (new pcl::PointCloud<pcl::PointXYZI>);
-    cloud_fmm_vel->height = 1;
-    cloud_fmm_vel->is_dense = true;
-    cloud_fmm_vel->header.frame_id = "odom";
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_vel (new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_vel->height = 1;
+    cloud_vel->is_dense = true;
+    cloud_vel->header.frame_id = "odom";
 
     long int cnt = 0;
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
-        pcl::PointXYZI fmm_vel_pt = idx2pt(grid_idx);
-        fmm_vel_pt.intensity = grid_fmm_3d[grid_idx].getOccupancy();
-        if(fmm_vel_pt.intensity > 0)
+        pcl::PointXYZI vel_pt = idx2pt(grid_idx);
+        vel_pt.intensity = grid_fmm_3d[grid_idx].getOccupancy();
+        if(vel_pt.intensity > 0)
         {
             cnt++;
-            cloud_fmm_vel->push_back(fmm_vel_pt);
+            cloud_vel->push_back(vel_pt);
         }
     }
 
-    cloud_fmm_vel->width = cnt;
+    cloud_vel->width = cnt;
 
     // DEBUGGING
-    // std::cout << "cloud_fmm_vel cnt: " << cnt << std::endl;
-    // std::cout << "cloud_fmm_vel.points.size: " << cloud_fmm_vel.points.size() << std::endl;
+    // std::cout << "cloud_vel cnt: " << cnt << std::endl;
+    // std::cout << "cloud_vel.points.size: " << cloud_vel.points.size() << std::endl;
 
     sensor_msgs::PointCloud2 velMap;
-    pcl::toROSMsg(*cloud_fmm_vel, velMap);
-    _map_fmm_vel_vis_pub.publish(velMap);
+    pcl::toROSMsg(*cloud_vel, velMap);
+    _map_vel_vis_pub.publish(velMap);
 
     ////////////////////////////////////////
     // FIND TRAVERSABLE POINTS NEAR ROBOT //
     ////////////////////////////////////////
 
     pcl::KdTreeFLANN<pcl::PointXYZI> kdtree;
-    kdtree.setInputCloud (cloud_fmm_vel);
+    kdtree.setInputCloud (cloud_vel);
     pcl::PointXYZI searchPoint;
     searchPoint.x = _start_pt(0) - _start_pt_rounding_eror(0);
     searchPoint.y = _start_pt(1) - _start_pt_rounding_eror(1);
@@ -444,9 +525,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     {
         // DEBUGGING
         // for (std::size_t i = 0; i < pointIdxRadiusSearch.size (); ++i)
-        // std::cout   << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].x
-        //             << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].y
-        //             << " " << cloud_fmm_vel->points[ pointIdxRadiusSearch[i] ].z
+        // std::cout   << " " << cloud_vel->points[ pointIdxRadiusSearch[i] ].x
+        //             << " " << cloud_vel->points[ pointIdxRadiusSearch[i] ].y
+        //             << " " << cloud_vel->points[ pointIdxRadiusSearch[i] ].z
         //             << "    (dist: " << pointRadiusSquaredDistance[i] << ")" << std::endl;
     }
 
@@ -468,9 +549,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     {
         for(int i = 0; i < pointIdxRadiusSearch.size (); i++)
         {
-            fmm_init_pt = {cloud_fmm_vel->points[pointIdxRadiusSearch[i]].x,
-                           cloud_fmm_vel->points[pointIdxRadiusSearch[i]].y,
-                           cloud_fmm_vel->points[pointIdxRadiusSearch[i]].z};
+            fmm_init_pt = {cloud_vel->points[pointIdxRadiusSearch[i]].x,
+                           cloud_vel->points[pointIdxRadiusSearch[i]].y,
+                           cloud_vel->points[pointIdxRadiusSearch[i]].z};
             fmm_init_idx = ptVect2idx(fmm_init_pt);
             if(grid_fmm_3d[fmm_init_idx[3]].isOccupied() == 0)
             {
@@ -508,41 +589,41 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // LOCAL FMM ARRIVAL TIME PCL //
     ////////////////////////////////
 
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fmm_time (new pcl::PointCloud<pcl::PointXYZI>);
-    cloud_fmm_time->height = 1;
-    cloud_fmm_time->is_dense = true;
-    cloud_fmm_time->header.frame_id = "odom";
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_time (new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_time->height = 1;
+    cloud_time->is_dense = true;
+    cloud_time->header.frame_id = "odom";
 
     cnt = 0;
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
-        pcl::PointXYZI fmm_time_pt = idx2pt(grid_idx);
-        fmm_time_pt.intensity = grid_fmm_3d[grid_idx].getArrivalTime(); // ARRIVAL TIME ()
-        if(fmm_time_pt.intensity > 0 && fmm_time_pt.intensity < 99999)
+        pcl::PointXYZI time_pt = idx2pt(grid_idx);
+        time_pt.intensity = grid_fmm_3d[grid_idx].getArrivalTime(); // ARRIVAL TIME ()
+        if(time_pt.intensity > 0 && time_pt.intensity < 99999)
         {
             cnt++;
-            cloud_fmm_time->push_back(fmm_time_pt);
+            cloud_time->push_back(time_pt);
         }
     }
 
-    cloud_fmm_time->width = cnt;
+    cloud_time->width = cnt;
 
     // DEBUGGING
-    // std::cout << "cloud_fmm_time cnt: " << cnt << std::endl;
-    // std::cout << "cloud_fmm_time.points.size: " << cloud_fmm_time.points.size() << std::endl;
+    // std::cout << "cloud_time cnt: " << cnt << std::endl;
+    // std::cout << "cloud_time.points.size: " << cloud_time.points.size() << std::endl;
 
     sensor_msgs::PointCloud2 timeMap;
-    pcl::toROSMsg(*cloud_fmm_time, timeMap);
-    _map_fmm_time_vis_pub.publish(timeMap);
+    pcl::toROSMsg(*cloud_time, timeMap);
+    _map_time_vis_pub.publish(timeMap);
 
     //////////////////////
     // LOCAL REWARD PCL //
     //////////////////////
 
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_fmm_reward (new pcl::PointCloud<pcl::PointXYZI>);
-    cloud_fmm_reward->height = 1;
-    cloud_fmm_reward->is_dense = true;
-    cloud_fmm_reward->header.frame_id = "odom";
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_reward (new pcl::PointCloud<pcl::PointXYZI>);
+    cloud_reward->height = 1;
+    cloud_reward->is_dense = true;
+    cloud_reward->header.frame_id = "odom";
 
     float reward;
     cnt = 0;
@@ -552,17 +633,17 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     for(long int grid_idx = 0; grid_idx < _max_grid_idx; grid_idx++)
     {
         // Compute distance to desired point
-        pcl::PointXYZI fmm_reward_pt = idx2pt(grid_idx);
-        reward = sqrt((fmm_reward_pt.x - _desired_pt(0))*(fmm_reward_pt.x - _desired_pt(0))
-                    + (fmm_reward_pt.y - _desired_pt(1))*(fmm_reward_pt.y - _desired_pt(1))); // DISTANCE FROM GOAL POINT IN FRONT OF ROBOT
+        pcl::PointXYZI reward_pt = idx2pt(grid_idx);
+        reward = sqrt((reward_pt.x - _desired_pt(0))*(reward_pt.x - _desired_pt(0))
+                    + (reward_pt.y - _desired_pt(1))*(reward_pt.y - _desired_pt(1))); // DISTANCE FROM GOAL POINT IN FRONT OF ROBOT
                     
-        fmm_reward_pt.intensity = reward;
+        reward_pt.intensity = reward;
 
         // Push traversable points to pcl
         if(grid_fmm_3d[grid_idx].getArrivalTime() > 0 && grid_fmm_3d[grid_idx].getArrivalTime() < 99999)
         {
             cnt++;
-            cloud_fmm_reward->push_back(fmm_reward_pt);
+            cloud_reward->push_back(reward_pt);
 
             // Find point farthest away
             if (reward < min_dist)
@@ -570,20 +651,17 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
                 min_idx = cnt - 1;
                 min_dist = reward;
             }
-            
         }
-
-
     }
-    cloud_fmm_reward->width = cnt;
+    cloud_reward->width = cnt;
 
     // DEBUGGING
-    // std::cout << "cloud_fmm_reward cnt: " << cnt << std::endl;
-    // std::cout << "cloud_fmm_reward.points.size: " << cloud_fmm_time.points.size() << std::endl;
+    // std::cout << "cloud_reward cnt: " << cnt << std::endl;
+    // std::cout << "cloud_reward.points.size: " << cloud_time.points.size() << std::endl;
 
     sensor_msgs::PointCloud2 rewardMap;
-    pcl::toROSMsg(*cloud_fmm_reward, rewardMap);
-    _map_fmm_reward_vis_pub.publish(rewardMap);
+    pcl::toROSMsg(*cloud_reward, rewardMap);
+    _map_reward_vis_pub.publish(rewardMap);
 
     // DEBUGGING
     // std::cout << "min_idx: " << min_idx << std::endl;
@@ -592,35 +670,35 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // GOAL POINT SELECTION //
     //////////////////////////
 
-    pcl::PointXYZI fmm_max_reward_pt;
-    vector<long int> fmm_max_reward_idx;
+    pcl::PointXYZI max_reward_pt;
+    vector<long int> max_reward_idx;
 
-    if(cloud_fmm_reward->width > 0)
+    if(cloud_reward->width > 0)
     {
-        fmm_max_reward_pt = cloud_fmm_reward->points[min_idx];
+        max_reward_pt = cloud_reward->points[min_idx];
                                   
         // DEBUGGING
-        // std::cout << "inside if: cloud_fmm_reward.width: " << cloud_fmm_reward.width << std::endl;
+        // std::cout << "inside if: cloud_reward.width: " << cloud_reward.width << std::endl;
         // std::cout << "inside if: min_idx: " << min_idx << std::endl;
         // std::cout << "inside if: min_dist: " << min_dist << std::endl;
-        // std::cout << "inside if: cloud_fmm_reward.points[min_idx].x: " << cloud_fmm_reward.points[min_idx].x << std::endl;
-        // std::cout << "inside if: cloud_fmm_reward.points[min_idx].x: " << cloud_fmm_reward.points[min_idx].x << std::endl;
-        // std::cout << "inside if: cloud_fmm_reward.points[min_idx].y: " << cloud_fmm_reward.points[min_idx].y << std::endl;
-        // std::cout << "inside if: cloud_fmm_reward.points[min_idx].z: " << cloud_fmm_reward.points[min_idx].z << std::endl;
+        // std::cout << "inside if: cloud_reward.points[min_idx].x: " << cloud_reward.points[min_idx].x << std::endl;
+        // std::cout << "inside if: cloud_reward.points[min_idx].x: " << cloud_reward.points[min_idx].x << std::endl;
+        // std::cout << "inside if: cloud_reward.points[min_idx].y: " << cloud_reward.points[min_idx].y << std::endl;
+        // std::cout << "inside if: cloud_reward.points[min_idx].z: " << cloud_reward.points[min_idx].z << std::endl;
 
         geometry_msgs::PointStamped max_reward_point;
         max_reward_point.header.stamp = ros::Time::now();
         max_reward_point.header.frame_id = "odom";
-        max_reward_point.point.x = fmm_max_reward_pt.x;
-        max_reward_point.point.y = fmm_max_reward_pt.y;
-        max_reward_point.point.z = fmm_max_reward_pt.z;
+        max_reward_point.point.x = max_reward_pt.x;
+        max_reward_point.point.y = max_reward_pt.y;
+        max_reward_point.point.z = max_reward_pt.z;
             
         geometry_msgs::PoseStamped max_reward_pose;
         max_reward_pose.header.stamp = ros::Time::now();
         max_reward_pose.header.frame_id = "odom";
-        max_reward_pose.pose.position.x = fmm_max_reward_pt.x;
-        max_reward_pose.pose.position.y = fmm_max_reward_pt.y;
-        max_reward_pose.pose.position.z = fmm_max_reward_pt.z;
+        max_reward_pose.pose.position.x = max_reward_pt.x;
+        max_reward_pose.pose.position.y = max_reward_pt.y;
+        max_reward_pose.pose.position.z = max_reward_pt.z;
         max_reward_pose.pose.orientation.x = 0.0;
         max_reward_pose.pose.orientation.y = 0.0;
         max_reward_pose.pose.orientation.z = 0.0;
@@ -631,11 +709,11 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     }
     else
     {
-        fmm_max_reward_pt.x = _start_pt(0) - _start_pt_rounding_eror(0);
-        fmm_max_reward_pt.x = _start_pt(1) - _start_pt_rounding_eror(1);
-        fmm_max_reward_pt.x = _start_pt(2) - _start_pt_rounding_eror(2);
+        max_reward_pt.x = _start_pt(0) - _start_pt_rounding_eror(0);
+        max_reward_pt.x = _start_pt(1) - _start_pt_rounding_eror(1);
+        max_reward_pt.x = _start_pt(2) - _start_pt_rounding_eror(2);
     }
-    fmm_max_reward_idx = pt2idx(fmm_max_reward_pt);
+    max_reward_idx = pt2idx(max_reward_pt);
 
     /////////////////////////////
     // LOCAL PATH (FMM SOLVER) //
@@ -658,8 +736,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     path_coord.push_back(_start_pt);
 
-    unsigned int fmm_max_reward_grid_idx = (unsigned int)fmm_max_reward_idx[3];
-    if(grad3D.gradient_descent(grid_fmm_3d, fmm_max_reward_grid_idx, path3D, path_vels, time) == -1)
+    unsigned int max_reward_grid_idx = (unsigned int)max_reward_idx[3];
+    if(grad3D.gradient_descent(grid_fmm_3d, max_reward_grid_idx, path3D, path_vels, time) == -1)
     {
         std::cout << "GRADIENT DESCENT FMM ERROR" << std::endl;
     }
@@ -687,7 +765,7 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
             // DEBUGGING
             // std::cout << "path[" << path_idx << "]: " << pt(0) - _start_pt(0) << ", " << pt(1) - _start_pt(1) << ", " << pt(2) - _start_pt(2) << std::endl;
         }
-        publishVisPath(path_coord, _fm_path_vis_pub);
+        publishVisPath(path_coord, _path_vis_pub);
     }
 
     // DEBUGGING
@@ -871,21 +949,22 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     float goal_point_uncropped_dist = sqrt((goal_pt(0) - robot_pt(0)) * (goal_pt(0) - robot_pt(0))
                                             + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
                                             + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
+;
 
-    std::cout << "uncropped distance" << goal_point_uncropped_dist << std::endl;
-
-    if(goal_point_uncropped_dist > _look_ahead_distance)
+    if(goal_point_uncropped_dist > _max_goalpoint_distance)
     {
-        goal_pt(0) = robot_pt(0) + (goal_pt(0) - robot_pt(0)) / goal_point_uncropped_dist * _look_ahead_distance;
-        goal_pt(1) = robot_pt(1) + (goal_pt(1) - robot_pt(1)) / goal_point_uncropped_dist * _look_ahead_distance;
-        goal_pt(2) = robot_pt(2) + (goal_pt(2) - robot_pt(2)) / goal_point_uncropped_dist * _look_ahead_distance;
+        goal_pt(0) = robot_pt(0) + (goal_pt(0) - robot_pt(0)) / goal_point_uncropped_dist * _max_goalpoint_distance;
+        goal_pt(1) = robot_pt(1) + (goal_pt(1) - robot_pt(1)) / goal_point_uncropped_dist * _max_goalpoint_distance;
+        goal_pt(2) = robot_pt(2) + (goal_pt(2) - robot_pt(2)) / goal_point_uncropped_dist * _max_goalpoint_distance;
     }
 
     float goal_point_cropped_dist = sqrt((goal_pt(0) - robot_pt(0)) * (goal_pt(0) - robot_pt(0))
                                         + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
                                         + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
 
-    std::cout << "cropped distance" << goal_point_cropped_dist << std::endl;
+    // DEBUGGING
+    // std::cout << "uncropped distance: " << goal_point_uncropped_dist << std::endl
+    // std::cout << "cropped distance: " << goal_point_cropped_dist << std::endl;
 
     goal_point.header.stamp = ros::Time::now();
     goal_point.header.frame_id = "odom";
