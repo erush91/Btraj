@@ -60,8 +60,12 @@ bool _has_map   = false;
 bool _has_target= false;
 bool _has_traj  = false;
 
-Vector3d _start_pt, _start_pt_rounding_eror;
+Vector3d _start_pt;
+Vector3d _start_pt_rounding_eror;
 Vector3d _desired_pt;
+Vector3d _odom_start_pt;
+Vector3d _odom_start_pt_rounding_eror;
+Vector3d _odom_desired_pt;
 Vector3d max_reward_pt;
 Vector3d _map_origin;
 double _x_size, _y_size, _z_size;
@@ -162,13 +166,13 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
     _odom = odom;
     _has_odom = true;
 
-    _start_pt(0)  = _odom.pose.pose.position.x;
-    _start_pt(1)  = _odom.pose.pose.position.y;
-    _start_pt(2)  = _odom.pose.pose.position.z;
+    _odom_start_pt(0)  = _odom.pose.pose.position.x;
+    _odom_start_pt(1)  = _odom.pose.pose.position.y;
+    _odom_start_pt(2)  = _odom.pose.pose.position.z;
 
-    _start_pt_rounding_eror(0) = ((_start_pt(0) * _inv_resolution) - round(_start_pt(0) * _inv_resolution)) * _resolution;
-    _start_pt_rounding_eror(1) = ((_start_pt(1) * _inv_resolution) - round(_start_pt(1) * _inv_resolution)) * _resolution;
-    _start_pt_rounding_eror(2) = ((_start_pt(2) * _inv_resolution) - round(_start_pt(2) * _inv_resolution)) * _resolution;
+    _odom_start_pt_rounding_eror(0) = ((_odom_start_pt(0) * _inv_resolution) - round(_odom_start_pt(0) * _inv_resolution)) * _resolution;
+    _odom_start_pt_rounding_eror(1) = ((_odom_start_pt(1) * _inv_resolution) - round(_odom_start_pt(1) * _inv_resolution)) * _resolution;
+    _odom_start_pt_rounding_eror(2) = ((_odom_start_pt(2) * _inv_resolution) - round(_odom_start_pt(2) * _inv_resolution)) * _resolution;
 
     tf::Quaternion quat(_odom.pose.pose.orientation.x,
                         _odom.pose.pose.orientation.y,
@@ -182,9 +186,9 @@ void rcvOdometryCallbck(const nav_msgs::Odometry odom)
     // DEBUGGING
     // std::cout << "yaw: " << yaw << std::endl;
     
-    _desired_pt(0)  = _start_pt(0) + 5*cos(-yaw);
-    _desired_pt(1)  = _start_pt(1) - 5*sin(-yaw);
-    _desired_pt(2)  = _start_pt(2);
+    _odom_desired_pt(0)  = _odom_start_pt(0) + 5*cos(-yaw);
+    _odom_desired_pt(1)  = _odom_start_pt(1) - 5*sin(-yaw);
+    _odom_desired_pt(2)  = _odom_start_pt(2);
 
 
     // DEBUGGING
@@ -266,6 +270,11 @@ Vector3d xyz2ptVect(vector<int> xyz_idx)
 
 void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 {
+
+    _start_pt               = _odom_start_pt;
+    _start_pt_rounding_eror = _odom_start_pt_rounding_eror;
+    _desired_pt             = _odom_desired_pt;
+
     // Record start time
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -369,9 +378,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     pcl::KdTreeFLANN<pcl::PointXYZI> kdtree;
     kdtree.setInputCloud (cloud_fmm_vel);
     pcl::PointXYZI searchPoint;
-    searchPoint.x = _start_pt(0);
-    searchPoint.y = _start_pt(1);
-    searchPoint.z = _start_pt(2);
+    searchPoint.x = _start_pt(0) - _start_pt_rounding_eror(0);
+    searchPoint.y = _start_pt(1) - _start_pt_rounding_eror(1);
+    searchPoint.z = _start_pt(2) - _start_pt_rounding_eror(2);
 
     // Neighbors within radius search
 
@@ -412,7 +421,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     bool fmm_init_pt_safe = 0;
 
-    vector<float> fmm_init_pt = {_start_pt(0), _start_pt(1), _start_pt(2)};
+    vector<float> fmm_init_pt = {_start_pt(0) - _start_pt_rounding_eror(0),
+                                 _start_pt(1) - _start_pt_rounding_eror(1),
+                                 _start_pt(2) - _start_pt_rounding_eror(2)};
     vector<long int> fmm_init_idx = ptVect2idx(fmm_init_pt);
     if(grid_fmm_3d[fmm_init_idx[3]].isOccupied() == 0)
     {
@@ -440,9 +451,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     vector<unsigned int> startIndices;
     startIndices.push_back(fmm_init_idx[3]);
 
-    ////////////////////////////
-    // FIND FMM ARRIVAL TIMES //
-    ////////////////////////////
+    ///////////////////////////////
+    // COMPUTE FMM ARRIVAL TIMES //
+    ///////////////////////////////
 
     std::cout << "FMM INITIAL POINT: (" << fmm_init_pt[0] << ", " << fmm_init_pt[1] << ", " << fmm_init_pt[2] 
                                         << ") VELOCITY: " << grid_fmm_3d[fmm_init_idx[3]].getOccupancy() << std::endl;
@@ -586,9 +597,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     }
     else
     {
-        fmm_max_reward_pt.x = _start_pt(0);
-        fmm_max_reward_pt.x = _start_pt(1);
-        fmm_max_reward_pt.x = _start_pt(2);
+        fmm_max_reward_pt.x = _start_pt(0) - _start_pt_rounding_eror(0);
+        fmm_max_reward_pt.x = _start_pt(1) - _start_pt_rounding_eror(1);
+        fmm_max_reward_pt.x = _start_pt(2) - _start_pt_rounding_eror(2);
     }
     fmm_max_reward_idx = pt2idx(fmm_max_reward_pt);
 
@@ -609,6 +620,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
     vector<Vector3d> path_coord;
     int cnt2 = 0;
+
+
+    path_coord.push_back(_start_pt);
 
     unsigned int fmm_max_reward_grid_idx = (unsigned int)fmm_max_reward_idx[3];
     if(grad3D.gradient_descent(grid_fmm_3d, fmm_max_reward_grid_idx, path3D, path_vels, time) == -1)
@@ -666,9 +680,9 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     visualization_msgs::MarkerArray collision_vectors_msg;
 
     // Find xyz coordinate of robot point 
-    vector<float> robot_pt_xyz = {0.5 * _resolution + _start_pt(0) - _start_pt_rounding_eror(0),
-                                  0.5 * _resolution + _start_pt(1) - _start_pt_rounding_eror(1),
-                                  0.5 * _resolution + _start_pt(2) - _start_pt_rounding_eror(2)};
+    vector<float> robot_pt_xyz = {0.5 * _resolution + (_start_pt(0) - _start_pt_rounding_eror(0)),
+                                  0.5 * _resolution + (_start_pt(1) - _start_pt_rounding_eror(1)),
+                                  0.5 * _resolution + (_start_pt(2) - _start_pt_rounding_eror(2))};
                                     
     // Find xyz indices of robot point in FMM map
     vector<long int> robot_pt_idx = ptVect2idx(robot_pt_xyz);
@@ -818,17 +832,17 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
 
         std::cout << "uncropped distance" << goal_point_uncropped_dist << std::endl;
 
-        if(goal_point_uncropped_dist > 1)
+        if(goal_point_uncropped_dist > _look_ahead_distance)
         {
-            goal_pt(0) = robot_pt(0) + (goal_pt(0) - robot_pt(0)) * _look_ahead_distance / goal_point_uncropped_dist;
-            goal_pt(1) = robot_pt(1) + (goal_pt(1) - robot_pt(1)) * _look_ahead_distance / goal_point_uncropped_dist;
-            goal_pt(2) = robot_pt(2) + (goal_pt(2) - robot_pt(2)) * _look_ahead_distance / goal_point_uncropped_dist;
+            goal_pt(0) = robot_pt(0) + (goal_pt(0) - robot_pt(0)) / goal_point_uncropped_dist * _look_ahead_distance;
+            goal_pt(1) = robot_pt(1) + (goal_pt(1) - robot_pt(1)) / goal_point_uncropped_dist * _look_ahead_distance;
+            goal_pt(2) = robot_pt(2) + (goal_pt(2) - robot_pt(2)) / goal_point_uncropped_dist * _look_ahead_distance;
         }
 
 
         float goal_point_cropped_dist = sqrt((goal_pt(0) - robot_pt(0)) * (goal_pt(0) - robot_pt(0))
-                                             + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
-                                             + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
+                                           + (goal_pt(1) - robot_pt(1)) * (goal_pt(1) - robot_pt(1))
+                                           + (goal_pt(2) - robot_pt(2)) * (goal_pt(2) - robot_pt(2)));
 
         std::cout << "cropped distance" << goal_point_cropped_dist << std::endl;
 
@@ -858,8 +872,8 @@ void rcvPointCloudCallBack(const sensor_msgs::PointCloud2 & pointcloud_map)
     // std::cout << sqrt(goal_point.point.x*goal_point.point.x + goal_point.point.y*goal_point.point.y + goal_point.point.z*goal_point.point.z) << std::endl;
     std::cout << "GOAL POINT: " << goal_point.point.x << ", " << goal_point.point.y << ", " << goal_point.point.z << std::endl;
     
-    // _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
-    // _collision_vector_vis_pub.publish(collision_vectors_msg);
+    _line_of_sight_vector_vis_pub.publish(line_of_sight_vectors_msg);
+    _collision_vector_vis_pub.publish(collision_vectors_msg);
 
     // Record end time
     auto finish = std::chrono::high_resolution_clock::now();
